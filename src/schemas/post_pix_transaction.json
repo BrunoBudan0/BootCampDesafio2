@@ -1,0 +1,65 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "amount", "transaction_date", "source_account", "destination_account", "source"],
+    "properties": {
+        "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+        },
+        "amount": {"$ref": "definitions.json#/definitions/amount_cents"},
+        "transaction_date": {"$ref": "definitions.json#/definitions/date_time_with_offset"},
+        "source_account": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["branch", "account_number", "opening_date", "owner"],
+            "properties": {
+                "branch": {"$ref": "definitions.json#/definitions/branch"},
+                "account_number": {"$ref": "definitions.json#/definitions/account_number"},
+                "opening_date": {"$ref": "definitions.json#/definitions/date_time_with_offset"},
+                "owner": {"$ref": "definitions.json#/definitions/owner"}
+            }
+        },
+        "destination_account": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["participant", "branch", "account_number", "opening_date", "owner"],
+            "properties": {
+                "participant": {"$ref": "definitions.json#/definitions/participant"},
+                "branch": {"$ref": "definitions.json#/definitions/branch"},
+                "account_number": {"$ref": "definitions.json#/definitions/account_number"},
+                "opening_date": {"$ref": "definitions.json#/definitions/date_time_with_offset"},
+                "owner": {"$ref": "definitions.json#/definitions/owner"}
+            }
+        },
+        "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["device_id", "channel", "ip"],
+            "properties": {
+                "device_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._:-]{1,100}$"
+                },
+                "channel": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]{0,29}$"
+                },
+                "ip": {
+                    "type": "string",
+                    "pattern": "^[0-9A-Fa-f:.]{2,45}$"
+                },
+                "geolocation": {
+                    "type": ["object", "null"],
+                    "additionalProperties": false,
+                    "required": ["latitude", "longitude"],
+                    "properties": {
+                        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+                        "longitude": {"type": "number", "minimum": -180, "maximum": 180}
+                    }
+                }
+            }
+        }
+    }
+}
