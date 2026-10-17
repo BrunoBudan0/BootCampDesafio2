@@ -122,11 +122,14 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Destino conhecido | `known_destination` | Recebedor com pelo menos N Pix aceitos do pagador (3) | |
 | Conta de destino recente | `destination_account_opened_*` | Conta de destino aberta há poucos dias | Destino novo |
 | Mesma titularidade | `same_owner` | Documento do pagador igual ao do recebedor | |
-| Fan-in | `destination_receiving_from_many_sources` | Recebedor PF que recebe de muitos pagadores diferentes em pouco tempo | |
-| Recebedor com reprovações | `destination_rejected_for_other_sources` | Recebedor com Pix reprovados ou 2FA recusados de outros pagadores em pouco tempo. Só soma risco e não conta as reprovações que ela mesma causou | |
+| Fan-in | `destination_receiving_from_many_sources` | Recebedor PF que recebe Pix a partir do piso das regras de valor de muitos pagadores diferentes em pouco tempo | |
+| Recebedor com reprovações | `destination_rejected_for_other_sources` | Recebedor com 2FA recusados, ou com Pix reprovados em que disparou alguma regra de contraparte, vindos de outros pagadores em pouco tempo. Só soma risco e ignora as análises em que ela mesma disparou | |
 | Recebedor em várias contas | `destination_document_in_many_accounts` | Mesmo documento de recebedor recebendo em várias contas de destino diferentes em pouco tempo. Recebedor PJ tem um limite próprio, bem maior | |
 | Limite de PJ | `company_threshold` | Limite próprio de uma regra quando o recebedor é PJ. O banco aumenta criando uma versão nova da política | |
-| Risco do recebedor | `destination_risk` | Soma dos pontos das regras de contraparte disparadas, sem teto, menos os redutores de mesma titularidade e destino conhecido. Nunca fica abaixo de zero | Pontuação de risco |
+| Alcance do sinal | `rule.counterparty_signal`: `relationship`, `base` | Diz se uma regra de contraparte depende só deste pagador ou de todos os pagadores da instalação | Família |
+| Sinal da relação | `relationship` | Regra de contraparte que depende do que este pagador sabe do recebedor: idade da conta de destino e destino novo acima do teto habitual. Os redutores abatem | Sinal da base |
+| Sinal da base | `base` | Regra de contraparte que depende do que todos os pagadores da instalação viram do recebedor: fan-in, recebedor com reprovações e recebedor em várias contas. Os redutores não abatem, porque o que um pagador sabe do recebedor não apaga o que a base inteira viu | Sinal da relação |
+| Risco do recebedor | `destination_risk` | Pontos dos sinais da relação menos os redutores de mesma titularidade e destino conhecido, nunca abaixo de zero, mais os pontos dos sinais da base. Sem teto | Pontuação de risco |
 | Alerta de recebedor | `destination_alert` | Aviso no `metadata` quando o risco do recebedor atinge o limiar. Não muda a decisão | 2FA |
 | Limiar de alerta | `destination_alert_threshold` | Risco do recebedor a partir do qual sai o alerta (30) | |
 | Conta laranja | (conceito) | Conta usada para receber e repassar dinheiro de fraude. É o que as regras de contraparte procuram | |

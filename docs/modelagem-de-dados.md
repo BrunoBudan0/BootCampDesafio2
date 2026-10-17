@@ -53,6 +53,7 @@ Catálogo de regras, semeado. Diz o que cada regra é e qual a forma dos seus aj
 | `code` | VARCHAR(80) | UNIQUE |
 | `kind` | VARCHAR(20) | CHECK em `scoring`, `reducer`, `eliminatory`, `regulatory` |
 | `family` | VARCHAR(20) NULL | CHECK em `identity`, `velocity`, `amount`, `counterparty`. Preenchida se e somente se `kind = 'scoring'` |
+| `counterparty_signal` | VARCHAR(15) NULL | CHECK em `relationship`, `base`. Preenchida se e somente se `family = 'counterparty'` |
 | `forced_decision_id` | INTEGER NULL | FK `decision`. Preenchida se e somente se `kind` for `eliminatory` ou `regulatory` |
 | `threshold_unit` | VARCHAR(30) NULL | CHECK em `count`, `days`, `km_per_hour`, `multiplier`, `credibility_weight`. Nula quando a regra não tem limite |
 | `uses_window` | BOOLEAN | A regra tem janela própria em minutos |
@@ -231,12 +232,12 @@ Análises com decisão `approved`, mais as com decisão `two_factor_required` e 
 | `burst_of_pix` | pontuação | tempo | 25 | 5 Pix | 5 min |
 | `amount_above_baseline` | pontuação | valor | 25 | 5 × base de comparação | |
 | `monthly_volume_above_typical` | pontuação | valor | 20 | 3 × volume mensal típico | 30 dias |
-| `destination_account_opened_very_recently` | pontuação | contraparte | 30 | 7 dias | |
-| `destination_account_opened_recently` | pontuação | contraparte | 20 | 30 dias | |
-| `new_destination_above_usual_ceiling` | pontuação | contraparte | 25 | | |
-| `destination_receiving_from_many_sources` | pontuação | contraparte | 30 | 5 pagadores, só recebedor PF | 1 h |
-| `destination_rejected_for_other_sources` | pontuação | contraparte | 20 | 2 outros pagadores | 7 dias |
-| `destination_document_in_many_accounts` | pontuação | contraparte | 30 | 3 contas de destino; recebedor PJ: 10 | 24 h |
+| `destination_account_opened_very_recently` | pontuação | contraparte (relação) | 25 | 7 dias | |
+| `destination_account_opened_recently` | pontuação | contraparte (relação) | 20 | 30 dias | |
+| `new_destination_above_usual_ceiling` | pontuação | contraparte (relação) | 25 | | |
+| `destination_receiving_from_many_sources` | pontuação | contraparte (base) | 30 | 5 pagadores com Pix a partir do piso das regras de valor, só recebedor PF | 1 h |
+| `destination_rejected_for_other_sources` | pontuação | contraparte (base) | 20 | 2 outros pagadores com 2FA recusado ou reprovação com regra de contraparte | 7 dias |
+| `destination_document_in_many_accounts` | pontuação | contraparte (base) | 30 | 3 contas de destino; recebedor PJ: 10 | 24 h |
 | `same_owner` | redutor | | -30 | | |
 | `known_destination` | redutor | | -20 | 3 Pix aceitos | |
 | `long_registered_device` | redutor | | -10 | 30 dias | |
@@ -246,7 +247,10 @@ Regras de convivência:
 - A mediana do pagador e a mediana da população são calculadas pelo par pagador → recebedor do Pix analisado. O início frio continua sendo do pagador inteiro; um par sem histórico só pesa mais o ticket médio de referência.
 - Em início frio não pontuam: familiaridade de IP, local e canal, e a família valor (valor fora do padrão e volume mensal). O limite do dispositivo não cadastrado também não dispara.
 - Se o primeiro Pix aceito do pagador veio por 2FA confirmado, a origem do cadastro do dispositivo é `two_factor`.
-- `destination_rejected_for_other_sources` só soma risco, nunca reprova sozinha, e não conta as análises em que ela mesma disparou, para não se realimentar.
+- `destination_account_opened_very_recently` vale 25, abaixo do limiar de alerta: conta de destino nova sozinha não gera alerta, mas gera com qualquer outro sinal.
+- `destination_rejected_for_other_sources` só soma risco e nunca reprova sozinha. Conta os 2FA recusados e os Pix reprovados em que disparou alguma regra de contraparte ou `new_account_to_new_destination_far_above_cap`. Reprovação por motivo só do pagador (limite noturno, dispositivo compartilhado, viagem impossível) não diz nada sobre o recebedor e fica de fora. Ignora as análises em que ela mesma disparou, para não se realimentar.
+- `destination_receiving_from_many_sources` só conta pagadores cujo Pix atingiu `amount_rules_floor_cents`, para racha de conta e vaquinha de valor baixo não parecerem conta laranja.
+- Risco do recebedor: os redutores abatem só os sinais da relação (`counterparty_signal = 'relationship'`). Os sinais da base (`counterparty_signal = 'base'`) entram inteiros. `destination_risk = max(0, sinais da relação - mesma titularidade - destino conhecido) + sinais da base`.
 - O limite de PJ em `destination_document_in_many_accounts` fica em `company_threshold` e o banco aumenta criando uma versão nova da política.
 - Valor acumulado de cada regra de valor (princípio 8):
   - total do pagador: `new_account_above_cap`, `nightly_limit_exceeded` (soma da noite) e `unregistered_device_limit_exceeded` (soma do dia no mesmo dispositivo);
@@ -258,7 +262,7 @@ Regras de convivência:
 1. Regras eliminatórias. Se alguma dispara, as que dispararam são gravadas, a decisão é `rejected` e a análise termina aqui. `risk_score` e `destination_risk` ficam nulos.
 2. Regras de pontuação e redutores. Pontuação de risco = soma de cada família limitada ao seu teto, menos os redutores, nunca abaixo de zero. A faixa sai dos limiares da versão vigente.
 3. Regras regulatórias. O limite noturno estourado reprova; o limite do dispositivo não cadastrado pede no mínimo 2FA. Vale a mais severa entre elas e a faixa da pontuação.
-4. Risco do recebedor. Se atinge `destination_alert_threshold`, sai um alerta em `metadata.alerts`. Não muda a decisão.
+4. Risco do recebedor. Sinais da relação menos os redutores de mesma titularidade e destino conhecido, nunca abaixo de zero, mais os sinais da base. Se atinge `destination_alert_threshold`, sai um alerta em `metadata.alerts`. Não muda a decisão.
 
 ## Modelos de política (carga inicial)
 
@@ -274,7 +278,7 @@ Regras de convivência:
 | Valor acumulado de curto prazo | Todas as regras de valor (princípio 8) | `accepted_pix` mais 2FA pendentes do pagador na janela de curto prazo |
 | Limite noturno aprovado | `nightly_limit_exceeded` | `source_nightly_limit` |
 | Tentativas | Rajada, dispositivo compartilhado, fan-in, recebedor em várias contas | Todas as análises |
-| Reprovações do recebedor | `destination_rejected_for_other_sources` | Análises reprovadas e 2FA recusados de outros pagadores para o mesmo documento de recebedor |
+| Reprovações do recebedor | `destination_rejected_for_other_sources` | 2FA recusados e análises reprovadas com regra de contraparte disparada, de outros pagadores para o mesmo documento de recebedor |
 | 2FA recusado | `two_factor_denied_recently` | `two_factor_confirmation` com `denied` |
 | Cadastro | Limite do dispositivo, viagem impossível em dispositivo não cadastrado, dispositivo cadastrado há muito tempo | `registered_device` |
 
