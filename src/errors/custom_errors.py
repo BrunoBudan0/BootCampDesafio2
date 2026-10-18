@@ -210,8 +210,8 @@ class RiskNotAcknowledged(QIException):
         title = "Risk Not Acknowledged"
         http_status = 422
         settings = ", ".join(loosened_settings)
-        description = f"This edit loosens the policy compared with the reference ({settings}). Send acknowledged_risk and requested_by to confirm it."
-        translation = f"Esta edição afrouxa a política em relação à referência ({settings}). Envie acknowledged_risk e requested_by para confirmar."
+        description = f"This edit loosens the policy compared with the reference ({settings}). Send risk_acknowledged and requested_by to confirm it."
+        translation = f"Esta edição afrouxa a política em relação à referência ({settings}). Envie risk_acknowledged e requested_by para confirmar."
         super().__init__(title, self.code, http_status, description, translation)
 
 

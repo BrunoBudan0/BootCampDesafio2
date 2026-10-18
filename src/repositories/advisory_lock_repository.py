@@ -3,8 +3,8 @@ import hashlib
 from sqlalchemy import text
 
 
-def source_lock_name(source_document: str) -> str:
-    return f"source:{source_document}"
+def source_lock_name(source_document_number: str) -> str:
+    return f"source:{source_document_number}"
 
 
 def advisory_lock_number(lock_name: str) -> int:

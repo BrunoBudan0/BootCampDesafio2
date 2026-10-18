@@ -43,11 +43,11 @@ class RiskPolicyController(BaseController):
     def get_current_bank_policy(self) -> dict:
         return risk_policy_response(self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME))
 
-    def get_bank_policy_version(self, version: str) -> dict:
-        if VERSION_NUMBER_PATTERN.fullmatch(version) is None:
+    def get_bank_policy_version(self, version_number_text: str) -> dict:
+        if VERSION_NUMBER_PATTERN.fullmatch(version_number_text) is None:
             raise RiskPolicyVersionNotFound()
 
-        policy_version = self.risk_policy_repository.find_version(RiskPolicy.BANK_NAME, int(version))
+        policy_version = self.risk_policy_repository.find_version(RiskPolicy.BANK_NAME, int(version_number_text))
 
         if policy_version is None:
             raise RiskPolicyVersionNotFound()
@@ -64,13 +64,13 @@ class RiskPolicyController(BaseController):
     def create_bank_policy_version(self, payload: dict) -> dict:
         rules_by_code = self.rule_repository.find_all_by_code()
         rule_edits = self.validated_rule_edits(payload.get("rules", []), rules_by_code)
-        risk_acknowledged = payload.get("acknowledged_risk", False)
+        risk_acknowledged = payload.get("risk_acknowledged", False)
         current_version = self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME)
         base_version = self.risk_policy_repository.find_current_version(payload.get("based_on_template", RiskPolicy.BANK_NAME))
 
         new_version = RiskPolicyVersion(
             risk_policy=current_version.risk_policy,
-            version=current_version.version + 1,
+            version_number=current_version.version_number + 1,
             based_on_version=base_version,
             change_reason=payload["change_reason"],
             requested_by=payload.get("requested_by"),
@@ -98,22 +98,22 @@ class RiskPolicyController(BaseController):
 
     def ensure_within_guardrails(self, version: RiskPolicyVersion, rules_by_code: dict, risk_acknowledged: bool) -> None:
         reference_version = self.risk_policy_repository.find_current_version(REFERENCE_POLICY_NAME)
-        loosened_settings = self.switched_off_rules(version, reference_version)
+        loosened_settings = self.rules_switched_off_against_reference(version, reference_version)
 
         for guardrail in self.risk_policy_guardrail_repository.find_all():
-            value = guardrail.value_in(version)
+            edited_value = guardrail.value_in(version)
 
-            if loosens(guardrail, value, guardrail.refusal_limit):
+            if loosens(guardrail, edited_value, guardrail.loosest_accepted_value):
                 raise OutsideSafetyRange(
-                    f"{guardrail.setting_name} = {brazilian_decimal(value)} is beyond the safety limit of {brazilian_decimal(guardrail.refusal_limit)}.",
-                    f"{guardrail.setting_name} = {brazilian_decimal(value)} passa do limite de segurança de {brazilian_decimal(guardrail.refusal_limit)}.",
+                    f"{guardrail.setting_name} = {brazilian_decimal(edited_value)} is beyond the safety limit of {brazilian_decimal(guardrail.loosest_accepted_value)}.",
+                    f"{guardrail.setting_name} = {brazilian_decimal(edited_value)} passa do limite de segurança de {brazilian_decimal(guardrail.loosest_accepted_value)}.",
                 )
 
-            if loosens(guardrail, value, guardrail.value_in(reference_version)):
+            if loosens(guardrail, edited_value, guardrail.value_in(reference_version)):
                 loosened_settings.append(guardrail.setting_name)
 
         missed_anchor_cases = [
-            anchor_case for anchor_case in ANCHOR_CASES if not anchor_case_outcome(anchor_case, version, rules_by_code).meets(anchor_case)
+            anchor_case for anchor_case in ANCHOR_CASES if not anchor_case_outcome(anchor_case, version, rules_by_code).reaches_the_minimum_of(anchor_case)
         ]
 
         if missed_anchor_cases:
@@ -123,23 +123,23 @@ class RiskPolicyController(BaseController):
             raise RiskNotAcknowledged(loosened_settings)
 
     @staticmethod
-    def switched_off_rules(version: RiskPolicyVersion, reference_version: RiskPolicyVersion) -> list:
+    def rules_switched_off_against_reference(version: RiskPolicyVersion, reference_version: RiskPolicyVersion) -> list:
         enabled_in_reference = {setting.rule.code: setting.enabled for setting in reference_version.rule_settings}
         switched_off = []
 
         for setting in version.rule_settings:
-            code = setting.rule.code
+            rule_code = setting.rule.code
 
-            if setting.enabled or not enabled_in_reference[code] or setting.rule.kind == "reducer":
+            if setting.enabled or not enabled_in_reference[rule_code] or setting.rule.kind == "reducer":
                 continue
 
             if setting.rule.kind == "eliminatory":
                 raise OutsideSafetyRange(
-                    f"The eliminatory rule {code} cannot be disabled.",
-                    f"A regra eliminatória {code} não pode ser desligada.",
+                    f"The eliminatory rule {rule_code} cannot be disabled.",
+                    f"A regra eliminatória {rule_code} não pode ser desligada.",
                 )
 
-            switched_off.append(f"{code}.enabled")
+            switched_off.append(f"{rule_code}.enabled")
 
         return switched_off
 
@@ -147,29 +147,29 @@ class RiskPolicyController(BaseController):
         rule_edits = {}
 
         for rule_edit_item in rule_edit_items:
-            code = rule_edit_item["code"]
+            rule_code = rule_edit_item["code"]
 
-            if code in rule_edits:
-                raise RepeatedRuleSetting(code)
+            if rule_code in rule_edits:
+                raise RepeatedRuleSetting(rule_code)
 
-            rule = rules_by_code.get(code)
+            rule = rules_by_code.get(rule_code)
 
             if rule is None:
-                raise UnknownRule(code)
+                raise UnknownRule(rule_code)
 
             if rule.kind == "regulatory":
-                raise RegulatoryRuleNotEditable(code)
+                raise RegulatoryRuleNotEditable(rule_code)
 
             setting_changes = {field: value for field, value in rule_edit_item.items() if field != "code"}
 
             for field, value in setting_changes.items():
                 if not self.rule_accepts_setting(rule, field):
-                    raise RuleSettingNotApplicable(code, field)
+                    raise RuleSettingNotApplicable(rule_code, field)
 
                 if field in DECIMAL_SETTING_FIELDS and not self.rule_accepts_setting_value(rule, field, value):
-                    raise RuleSettingNotApplicable(code, field, value)
+                    raise RuleSettingNotApplicable(rule_code, field, value)
 
-            rule_edits[code] = setting_changes
+            rule_edits[rule_code] = setting_changes
 
         return rule_edits
 
@@ -179,7 +179,7 @@ class RiskPolicyController(BaseController):
             "enabled": True,
             "points": rule.kind in ("scoring", "reducer"),
             "threshold": rule.threshold_unit is not None,
-            "window_minutes": rule.uses_window,
+            "window_minutes": rule.uses_window_minutes,
             "company_threshold": rule.uses_company_threshold,
         }
         return accepted_settings[field]
@@ -221,17 +221,17 @@ class RiskPolicyController(BaseController):
                 "O teto da relação não pode ser maior que o teto da família contraparte.",
             )
 
-        for code, setting in settings_by_code.items():
+        for rule_code, setting in settings_by_code.items():
             if setting.rule.kind == "scoring" and setting.points < 0:
                 raise InconsistentRiskPolicy(
-                    f"The scoring rule {code} cannot have negative points.",
-                    f"A regra de pontuação {code} não pode ter pontos negativos.",
+                    f"The scoring rule {rule_code} cannot have negative points.",
+                    f"A regra de pontuação {rule_code} não pode ter pontos negativos.",
                 )
 
             if setting.rule.kind == "reducer" and setting.points > 0:
                 raise InconsistentRiskPolicy(
-                    f"The reducer {code} cannot have positive points.",
-                    f"O redutor {code} não pode ter pontos positivos.",
+                    f"The reducer {rule_code} cannot have positive points.",
+                    f"O redutor {rule_code} não pode ter pontos positivos.",
                 )
 
         very_recent_account_days = settings_by_code["destination_account_opened_very_recently"].threshold
@@ -243,10 +243,10 @@ class RiskPolicyController(BaseController):
                 "A faixa de conta de destino muito recente precisa ser menor que a de conta de destino recente.",
             )
 
-        amount_multiplier = settings_by_code["amount_above_baseline"].threshold
-        far_amount_multiplier = settings_by_code["amount_far_above_baseline"].threshold
+        above_baseline_multiplier = settings_by_code["amount_above_baseline"].threshold
+        far_above_baseline_multiplier = settings_by_code["amount_far_above_baseline"].threshold
 
-        if far_amount_multiplier <= amount_multiplier:
+        if far_above_baseline_multiplier <= above_baseline_multiplier:
             raise InconsistentRiskPolicy(
                 "The far above baseline multiplier must be greater than the above baseline multiplier.",
                 "O multiplicador do valor muito fora do padrão precisa ser maior que o do valor fora do padrão.",
@@ -261,11 +261,11 @@ class RiskPolicyController(BaseController):
             )
 
 
-def loosens(guardrail: RiskPolicyGuardrail, value, compared_value) -> bool:
-    if value is None or compared_value is None:
+def loosens(guardrail: RiskPolicyGuardrail, edited_value, compared_value) -> bool:
+    if edited_value is None or compared_value is None:
         return False
 
     if guardrail.loosening_direction == "higher":
-        return value > compared_value
+        return edited_value > compared_value
 
-    return value < compared_value
+    return edited_value < compared_value

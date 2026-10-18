@@ -4,7 +4,7 @@ from tests.utils.assertions import assert_error, assert_rule_fired, assert_rule_
 from tests.utils.clock import business_hours_today, iso
 from tests.utils.pix_payload import new_individual_payee, new_individual_payer, pix_payload
 from tests.utils.request_generator import RequestGenerator
-from tests.utils.scenario import analyze, fire_together
+from tests.utils.scenario import analyze, send_all_at_the_same_time
 
 
 def reversed_keys(payload: dict) -> dict:
@@ -72,7 +72,7 @@ class TestPixTransactionIdempotency:
     def test_parallel_copies_of_the_same_pix_create_a_single_analysis(self):
         payload = pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today())
 
-        responses = fire_together([lambda: RequestGenerator.POST_pix_transaction(payload) for _ in range(5)])
+        responses = send_all_at_the_same_time([lambda: RequestGenerator.POST_pix_transaction(payload) for _ in range(5)])
 
         statuses = sorted(status for status, _ in responses)
         assert statuses == [200, 200, 200, 200, 201]

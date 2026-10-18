@@ -19,6 +19,6 @@ class PixTransactionResource:
 
     @SchemaHandler.validate("post_two_factor_confirmation.json")
     def on_post_two_factor(self, pix_id: str, payload: dict = Body(...)) -> JSONResponse:
-        status_code, analysis = PixAnalysisController().confirm_two_factor(pix_id, payload)
+        status_code, analysis = PixAnalysisController().record_two_factor_result(pix_id, payload)
 
         return JSONResponse(content=analysis, status_code=status_code)

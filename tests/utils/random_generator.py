@@ -19,24 +19,26 @@ def format_cnpj(cnpj_number: str) -> str:
 class RandomGenerator:
     @staticmethod
     def generate_cpf():
-        cpf = [random.randrange(10) for _ in range(9)]
+        cpf_digits = [random.randrange(10) for _ in range(9)]
         for _ in range(2):
-            value = sum([(len(cpf) + 1 - i) * v for i, v in enumerate(cpf)]) % 11
-            cpf.append(11 - value if value > 1 else 0)
-        cpf_number = "".join(str(x) for x in cpf)
+            weighted_sum_remainder = sum(
+                (len(cpf_digits) + 1 - position) * digit for position, digit in enumerate(cpf_digits)
+            ) % 11
+            cpf_digits.append(11 - weighted_sum_remainder if weighted_sum_remainder > 1 else 0)
+        cpf_number = "".join(str(digit) for digit in cpf_digits)
         cpf_number = f"{cpf_number[0:3]}.{cpf_number[3:6]}.{cpf_number[6:9]}-{cpf_number[9:11]}"
         return cpf_number
 
     @staticmethod
     def generate_cnpj():
-        cnpj = [random.randrange(10) for _ in range(8)] + [0, 0, 0, 1]
+        cnpj_digits = [random.randrange(10) for _ in range(8)] + [0, 0, 0, 1]
 
         for _ in range(2):
-            value = sum(v * (i % 8 + 2) for i, v in enumerate(reversed(cnpj)))
-            digit = 11 - value % 11
-            cnpj.append(digit if digit < 10 else 0)
+            weighted_sum = sum(digit * (position % 8 + 2) for position, digit in enumerate(reversed(cnpj_digits)))
+            check_digit = 11 - weighted_sum % 11
+            cnpj_digits.append(check_digit if check_digit < 10 else 0)
 
-        cnpj_number = "".join(str(x) for x in cnpj)
+        cnpj_number = "".join(str(digit) for digit in cnpj_digits)
 
         cnpj_number = (
             f"{cnpj_number[0:2]}.{cnpj_number[2:5]}.{cnpj_number[5:8]}/{cnpj_number[8:12]}-{cnpj_number[12:14]}"

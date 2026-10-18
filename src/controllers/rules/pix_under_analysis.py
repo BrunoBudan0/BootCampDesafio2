@@ -19,26 +19,26 @@ class PixUnderAnalysis:
     amount_cents: int
     transaction_date: datetime
     transaction_utc_offset_minutes: int
-    source_document: str
+    source_document_number: str
     source_person_type: str
     source_branch: str
     source_account_number: str
     source_account_opening_date: datetime
-    destination_participant: str
+    destination_participant_ispb: str
     destination_branch: str
     destination_account_number: str
     destination_account_opening_date: datetime
-    destination_document: str
+    destination_document_number: str
     destination_person_type: str
-    device_id: str
-    channel: str
-    ip: str
-    latitude: Optional[Decimal]
-    longitude: Optional[Decimal]
+    source_device_id: str
+    source_channel: str
+    source_ip: str
+    source_latitude: Optional[Decimal]
+    source_longitude: Optional[Decimal]
 
     @property
     def has_geolocation(self) -> bool:
-        return self.latitude is not None
+        return self.source_latitude is not None
 
 
 def required_datetime(text: str, field_name: str) -> datetime:
@@ -71,20 +71,20 @@ def finite_coordinate(value, field_name: str) -> Decimal:
     return Decimal(str(value))
 
 
-def normalized_payload(payload: dict, source_document: str, destination_document: str) -> dict:
-    normalized = json.loads(json.dumps(payload))
-    normalized["amount"] = int(payload["amount"])
-    normalized["source_account"]["owner"]["document_number"] = source_document
-    normalized["destination_account"]["owner"]["document_number"] = destination_document
-    normalized["source"]["channel"] = payload["source"]["channel"].lower()
-    if normalized["source"].get("geolocation") is None:
-        normalized["source"].pop("geolocation", None)
-    return normalized
+def normalized_payload(payload: dict, source_document_number: str, destination_document_number: str) -> dict:
+    normalized_payload_content = json.loads(json.dumps(payload))
+    normalized_payload_content["amount"] = int(payload["amount"])
+    normalized_payload_content["source_account"]["owner"]["document_number"] = source_document_number
+    normalized_payload_content["destination_account"]["owner"]["document_number"] = destination_document_number
+    normalized_payload_content["source"]["channel"] = payload["source"]["channel"].lower()
+    if normalized_payload_content["source"].get("geolocation") is None:
+        normalized_payload_content["source"].pop("geolocation", None)
+    return normalized_payload_content
 
 
-def payload_hash_of(normalized: dict) -> str:
-    canonical = json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode()).hexdigest()
+def payload_hash_of(normalized_payload_content: dict) -> str:
+    canonical_json_text = json.dumps(normalized_payload_content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical_json_text.encode()).hexdigest()
 
 
 def pix_under_analysis_from(payload: dict) -> PixUnderAnalysis:
@@ -102,11 +102,11 @@ def pix_under_analysis_from(payload: dict) -> PixUnderAnalysis:
     transaction_date = required_datetime(payload["transaction_date"], "transaction_date")
     source_account_opening_date = required_datetime(source_account["opening_date"], "source_account.opening_date")
     destination_account_opening_date = required_datetime(destination_account["opening_date"], "destination_account.opening_date")
-    source_document = required_document(source_account["owner"]["document_number"], "source_account.owner.document_number")
-    destination_document = required_document(
+    source_document_number = required_document(source_account["owner"]["document_number"], "source_account.owner.document_number")
+    destination_document_number = required_document(
         destination_account["owner"]["document_number"], "destination_account.owner.document_number"
     )
-    ip = required_ip(source["ip"])
+    source_ip = required_ip(source["ip"])
 
     if source_account_opening_date > transaction_date:
         raise AccountOpenedAfterTransaction("source_account")
@@ -116,24 +116,24 @@ def pix_under_analysis_from(payload: dict) -> PixUnderAnalysis:
 
     return PixUnderAnalysis(
         pix_id=payload["id"],
-        payload_hash=payload_hash_of(normalized_payload(payload, source_document, destination_document)),
+        payload_hash=payload_hash_of(normalized_payload(payload, source_document_number, destination_document_number)),
         amount_cents=int(payload["amount"]),
         transaction_date=transaction_date,
         transaction_utc_offset_minutes=utc_offset_minutes(transaction_date),
-        source_document=source_document,
-        source_person_type=person_type_of(source_document),
+        source_document_number=source_document_number,
+        source_person_type=person_type_of(source_document_number),
         source_branch=source_account["branch"],
         source_account_number=source_account["account_number"],
         source_account_opening_date=source_account_opening_date,
-        destination_participant=destination_account["participant"],
+        destination_participant_ispb=destination_account["participant"],
         destination_branch=destination_account["branch"],
         destination_account_number=destination_account["account_number"],
         destination_account_opening_date=destination_account_opening_date,
-        destination_document=destination_document,
-        destination_person_type=person_type_of(destination_document),
-        device_id=source["device_id"],
-        channel=source["channel"].lower(),
-        ip=ip,
-        latitude=latitude,
-        longitude=longitude,
+        destination_document_number=destination_document_number,
+        destination_person_type=person_type_of(destination_document_number),
+        source_device_id=source["device_id"],
+        source_channel=source["channel"].lower(),
+        source_ip=source_ip,
+        source_latitude=latitude,
+        source_longitude=longitude,
     )

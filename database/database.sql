@@ -13,7 +13,7 @@ CREATE TABLE rule(
     counterparty_signal             VARCHAR(15),
     forced_decision_id              INTEGER REFERENCES decision(id),
     threshold_unit                  VARCHAR(30),
-    uses_window                     BOOLEAN NOT NULL,
+    uses_window_minutes             BOOLEAN NOT NULL,
     uses_company_threshold          BOOLEAN NOT NULL DEFAULT false,
     description                     VARCHAR(255) NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -25,7 +25,7 @@ CREATE TABLE rule(
     CONSTRAINT ck_rule_family_only_for_scoring CHECK ((kind = 'scoring') = (family IS NOT NULL)),
     CONSTRAINT ck_rule_counterparty_signal_only_for_counterparty CHECK ((family IS NOT DISTINCT FROM 'counterparty') = (counterparty_signal IS NOT NULL)),
     CONSTRAINT ck_rule_forced_decision_only_for_eliminatory_and_regulatory CHECK ((kind IN ('eliminatory', 'regulatory')) = (forced_decision_id IS NOT NULL)),
-    CONSTRAINT ck_rule_regulatory_without_settings CHECK (kind <> 'regulatory' OR (threshold_unit IS NULL AND NOT uses_window AND NOT uses_company_threshold))
+    CONSTRAINT ck_rule_regulatory_without_settings CHECK (kind <> 'regulatory' OR (threshold_unit IS NULL AND NOT uses_window_minutes AND NOT uses_company_threshold))
 );
 
 CREATE TABLE risk_policy(
@@ -42,12 +42,12 @@ CREATE UNIQUE INDEX uq_risk_policy_single_bank ON risk_policy(kind) WHERE kind =
 CREATE TABLE risk_policy_version(
     id                                                          SERIAL PRIMARY KEY,
     risk_policy_id                                              INTEGER NOT NULL REFERENCES risk_policy(id),
-    version                                                     INTEGER NOT NULL,
+    version_number                                              INTEGER NOT NULL,
     based_on_version_id                                         INTEGER REFERENCES risk_policy_version(id),
     change_reason                                               VARCHAR(255) NOT NULL,
     history_window_days                                         INTEGER NOT NULL,
-    source_history_weight                                       INTEGER NOT NULL,
-    population_median_weight                                    INTEGER NOT NULL,
+    source_baseline_reference_weight                            INTEGER NOT NULL,
+    population_median_reference_weight                          INTEGER NOT NULL,
     reference_average_ticket_individual_to_individual_cents     BIGINT NOT NULL,
     reference_average_ticket_individual_to_company_cents        BIGINT NOT NULL,
     reference_average_ticket_company_to_individual_cents        BIGINT NOT NULL,
@@ -65,16 +65,16 @@ CREATE TABLE risk_policy_version(
     two_factor_score_threshold                                  INTEGER NOT NULL,
     rejection_score_threshold                                   INTEGER NOT NULL,
     two_factor_validity_minutes                                 INTEGER NOT NULL,
-    destination_alert_threshold                                 INTEGER NOT NULL,
+    destination_risk_alert_threshold                            INTEGER NOT NULL,
     short_term_window_minutes                                   INTEGER NOT NULL,
     requested_by                                                VARCHAR(100),
     risk_acknowledged                                           BOOLEAN NOT NULL DEFAULT false,
     created_at                                                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(risk_policy_id, version),
-    CONSTRAINT ck_risk_policy_version_positive_version CHECK (version > 0),
+    UNIQUE(risk_policy_id, version_number),
+    CONSTRAINT ck_risk_policy_version_positive_version_number CHECK (version_number > 0),
     CONSTRAINT ck_risk_policy_version_change_reason CHECK (char_length(btrim(change_reason)) > 0),
     CONSTRAINT ck_risk_policy_version_positive_windows CHECK (history_window_days > 0 AND short_term_window_minutes > 0 AND two_factor_validity_minutes > 0),
-    CONSTRAINT ck_risk_policy_version_positive_weights CHECK (source_history_weight > 0 AND population_median_weight > 0),
+    CONSTRAINT ck_risk_policy_version_positive_weights CHECK (source_baseline_reference_weight > 0 AND population_median_reference_weight > 0),
     CONSTRAINT ck_risk_policy_version_positive_reference_tickets CHECK (
         reference_average_ticket_individual_to_individual_cents > 0
         AND reference_average_ticket_individual_to_company_cents > 0
@@ -87,23 +87,23 @@ CREATE TABLE risk_policy_version(
     CONSTRAINT ck_risk_policy_version_relationship_cap CHECK (counterparty_relationship_cap > 0 AND counterparty_relationship_cap <= counterparty_family_cap),
     CONSTRAINT ck_risk_policy_version_behavior_score_cap CHECK (behavior_score_cap > 0),
     CONSTRAINT ck_risk_policy_version_score_thresholds CHECK (two_factor_score_threshold > 0 AND rejection_score_threshold > two_factor_score_threshold),
-    CONSTRAINT ck_risk_policy_version_destination_alert_threshold CHECK (destination_alert_threshold > 0),
+    CONSTRAINT ck_risk_policy_version_destination_risk_alert_threshold CHECK (destination_risk_alert_threshold > 0),
     CONSTRAINT ck_risk_policy_version_acknowledged_by_someone CHECK (NOT risk_acknowledged OR requested_by IS NOT NULL)
 );
 
 CREATE TABLE risk_policy_guardrail(
     id                              SERIAL PRIMARY KEY,
-    parameter_name                  VARCHAR(80),
+    policy_parameter_name           VARCHAR(80),
     rule_id                         INTEGER REFERENCES rule(id),
-    setting_field                   VARCHAR(20),
+    rule_setting_field              VARCHAR(20),
     loosening_direction             VARCHAR(10) NOT NULL,
-    refusal_limit                   NUMERIC(14,2),
+    loosest_accepted_value          NUMERIC(14,2),
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(parameter_name),
-    UNIQUE(rule_id, setting_field),
-    CONSTRAINT ck_risk_policy_guardrail_target CHECK ((parameter_name IS NULL) <> (rule_id IS NULL)),
-    CONSTRAINT ck_risk_policy_guardrail_setting_field_with_rule CHECK ((rule_id IS NULL) = (setting_field IS NULL)),
-    CONSTRAINT ck_risk_policy_guardrail_setting_field CHECK (setting_field IN ('points', 'threshold', 'company_threshold', 'window_minutes')),
+    UNIQUE(policy_parameter_name),
+    UNIQUE(rule_id, rule_setting_field),
+    CONSTRAINT ck_risk_policy_guardrail_target CHECK ((policy_parameter_name IS NULL) <> (rule_id IS NULL)),
+    CONSTRAINT ck_risk_policy_guardrail_rule_setting_field_with_rule CHECK ((rule_id IS NULL) = (rule_setting_field IS NULL)),
+    CONSTRAINT ck_risk_policy_guardrail_rule_setting_field CHECK (rule_setting_field IN ('points', 'threshold', 'company_threshold', 'window_minutes')),
     CONSTRAINT ck_risk_policy_guardrail_loosening_direction CHECK (loosening_direction IN ('higher', 'lower'))
 );
 
@@ -132,25 +132,25 @@ CREATE TABLE pix_analysis(
     amount_cents                        BIGINT NOT NULL,
     transaction_date                    TIMESTAMPTZ NOT NULL,
     transaction_utc_offset_minutes      SMALLINT NOT NULL,
-    source_document                     VARCHAR(14) NOT NULL,
+    source_document_number              VARCHAR(14) NOT NULL,
     source_person_type                  VARCHAR(10) NOT NULL,
     source_branch                       VARCHAR(10) NOT NULL,
     source_account_number               VARCHAR(20) NOT NULL,
     source_account_opening_date         TIMESTAMPTZ NOT NULL,
-    destination_participant             CHAR(8) NOT NULL,
+    destination_participant_ispb        CHAR(8) NOT NULL,
     destination_branch                  VARCHAR(10) NOT NULL,
     destination_account_number          VARCHAR(20) NOT NULL,
     destination_account_opening_date    TIMESTAMPTZ NOT NULL,
-    destination_document                VARCHAR(14) NOT NULL,
+    destination_document_number         VARCHAR(14) NOT NULL,
     destination_person_type             VARCHAR(10) NOT NULL,
-    device_id                           VARCHAR(100) NOT NULL,
-    channel                             VARCHAR(30) NOT NULL,
-    ip                                  INET NOT NULL,
-    latitude                            NUMERIC(8,6),
-    longitude                           NUMERIC(9,6),
+    source_device_id                    VARCHAR(100) NOT NULL,
+    source_channel                      VARCHAR(30) NOT NULL,
+    source_ip                           INET NOT NULL,
+    source_latitude                     NUMERIC(8,6),
+    source_longitude                    NUMERIC(9,6),
     decision_id                         INTEGER NOT NULL REFERENCES decision(id),
     risk_score                          INTEGER,
-    destination_risk                    INTEGER,
+    destination_risk_score              INTEGER,
     risk_policy_version_id              INTEGER NOT NULL REFERENCES risk_policy_version(id),
     two_factor_expires_at               TIMESTAMPTZ,
     created_at                          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -158,29 +158,29 @@ CREATE TABLE pix_analysis(
     UNIQUE(pix_id),
     CONSTRAINT ck_pix_analysis_amount CHECK (amount_cents > 0),
     CONSTRAINT ck_pix_analysis_utc_offset CHECK (transaction_utc_offset_minutes BETWEEN -720 AND 840),
-    CONSTRAINT ck_pix_analysis_source_document CHECK (source_document ~ '^([0-9]{11}|[0-9A-Z]{12}[0-9]{2})$'),
-    CONSTRAINT ck_pix_analysis_destination_document CHECK (destination_document ~ '^([0-9]{11}|[0-9A-Z]{12}[0-9]{2})$'),
+    CONSTRAINT ck_pix_analysis_source_document_number CHECK (source_document_number ~ '^([0-9]{11}|[0-9A-Z]{12}[0-9]{2})$'),
+    CONSTRAINT ck_pix_analysis_destination_document_number CHECK (destination_document_number ~ '^([0-9]{11}|[0-9A-Z]{12}[0-9]{2})$'),
     CONSTRAINT ck_pix_analysis_source_person_type CHECK (source_person_type IN ('individual', 'company')),
     CONSTRAINT ck_pix_analysis_destination_person_type CHECK (destination_person_type IN ('individual', 'company')),
-    CONSTRAINT ck_pix_analysis_source_person_type_matches_document CHECK ((source_person_type = 'individual') = (char_length(source_document) = 11)),
-    CONSTRAINT ck_pix_analysis_destination_person_type_matches_document CHECK ((destination_person_type = 'individual') = (char_length(destination_document) = 11)),
-    CONSTRAINT ck_pix_analysis_participant CHECK (destination_participant ~ '^[0-9]{8}$'),
+    CONSTRAINT ck_pix_analysis_source_person_type_matches_document_number CHECK ((source_person_type = 'individual') = (char_length(source_document_number) = 11)),
+    CONSTRAINT ck_pix_analysis_destination_person_type_matches_document_number CHECK ((destination_person_type = 'individual') = (char_length(destination_document_number) = 11)),
+    CONSTRAINT ck_pix_analysis_destination_participant_ispb CHECK (destination_participant_ispb ~ '^[0-9]{8}$'),
     CONSTRAINT ck_pix_analysis_branches CHECK (source_branch ~ '^[0-9]{1,10}$' AND destination_branch ~ '^[0-9]{1,10}$'),
     CONSTRAINT ck_pix_analysis_account_numbers CHECK (source_account_number ~ '^[0-9]{1,20}$' AND destination_account_number ~ '^[0-9]{1,20}$'),
     CONSTRAINT ck_pix_analysis_opening_dates CHECK (source_account_opening_date <= transaction_date AND destination_account_opening_date <= transaction_date),
-    CONSTRAINT ck_pix_analysis_channel CHECK (channel ~ '^[a-z][a-z0-9_]{0,29}$'),
-    CONSTRAINT ck_pix_analysis_latitude CHECK (latitude BETWEEN -90 AND 90),
-    CONSTRAINT ck_pix_analysis_longitude CHECK (longitude BETWEEN -180 AND 180),
-    CONSTRAINT ck_pix_analysis_geolocation_complete CHECK ((latitude IS NULL) = (longitude IS NULL)),
+    CONSTRAINT ck_pix_analysis_source_channel CHECK (source_channel ~ '^[a-z][a-z0-9_]{0,29}$'),
+    CONSTRAINT ck_pix_analysis_source_latitude CHECK (source_latitude BETWEEN -90 AND 90),
+    CONSTRAINT ck_pix_analysis_source_longitude CHECK (source_longitude BETWEEN -180 AND 180),
+    CONSTRAINT ck_pix_analysis_geolocation_complete CHECK ((source_latitude IS NULL) = (source_longitude IS NULL)),
     CONSTRAINT ck_pix_analysis_risk_score CHECK (risk_score >= 0),
-    CONSTRAINT ck_pix_analysis_destination_risk CHECK (destination_risk >= 0),
-    CONSTRAINT ck_pix_analysis_scores_together CHECK ((risk_score IS NULL) = (destination_risk IS NULL)),
+    CONSTRAINT ck_pix_analysis_destination_risk_score CHECK (destination_risk_score >= 0),
+    CONSTRAINT ck_pix_analysis_scores_together CHECK ((risk_score IS NULL) = (destination_risk_score IS NULL)),
     CONSTRAINT ck_pix_analysis_two_factor_expiration CHECK (two_factor_expires_at > transaction_date)
 );
 
-CREATE INDEX ix_pix_analysis_source_document ON pix_analysis(source_document, transaction_date);
-CREATE INDEX ix_pix_analysis_destination_document ON pix_analysis(destination_document, transaction_date);
-CREATE INDEX ix_pix_analysis_device ON pix_analysis(device_id, transaction_date);
+CREATE INDEX ix_pix_analysis_source_document_number ON pix_analysis(source_document_number, transaction_date);
+CREATE INDEX ix_pix_analysis_destination_document_number ON pix_analysis(destination_document_number, transaction_date);
+CREATE INDEX ix_pix_analysis_source_device ON pix_analysis(source_device_id, transaction_date);
 CREATE INDEX ix_pix_analysis_person_type_pair ON pix_analysis(source_person_type, destination_person_type, transaction_date);
 
 CREATE TABLE pix_analysis_rule_hit(
@@ -200,7 +200,7 @@ CREATE TABLE two_factor_confirmation(
     id                              BIGSERIAL PRIMARY KEY,
     pix_analysis_id                 BIGINT NOT NULL REFERENCES pix_analysis(id),
     result                          VARCHAR(10) NOT NULL,
-    confirmed_at                    TIMESTAMPTZ NOT NULL,
+    answered_at                     TIMESTAMPTZ NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(pix_analysis_id),
     CONSTRAINT ck_two_factor_confirmation_result CHECK (result IN ('confirmed', 'denied'))
@@ -208,41 +208,41 @@ CREATE TABLE two_factor_confirmation(
 
 CREATE TABLE registered_device(
     id                              BIGSERIAL PRIMARY KEY,
-    source_document                 VARCHAR(14) NOT NULL,
+    source_document_number          VARCHAR(14) NOT NULL,
     device_id                       VARCHAR(100) NOT NULL,
     registration_origin             VARCHAR(15) NOT NULL,
     registered_at                   TIMESTAMPTZ NOT NULL,
-    pix_analysis_id                 BIGINT NOT NULL REFERENCES pix_analysis(id),
+    registration_pix_analysis_id    BIGINT NOT NULL REFERENCES pix_analysis(id),
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(source_document, device_id),
+    UNIQUE(source_document_number, device_id),
     CONSTRAINT ck_registered_device_origin CHECK (registration_origin IN ('two_factor', 'first_seen'))
 );
 
 CREATE TABLE source_nightly_limit(
     id                              BIGSERIAL PRIMARY KEY,
-    source_document                 VARCHAR(14) NOT NULL,
+    source_document_number          VARCHAR(14) NOT NULL,
     nightly_limit_cents             BIGINT NOT NULL,
     requested_at                    TIMESTAMPTZ NOT NULL,
     effective_at                    TIMESTAMPTZ NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT ck_source_nightly_limit_individual_only CHECK (source_document ~ '^[0-9]{11}$'),
+    CONSTRAINT ck_source_nightly_limit_individual_only CHECK (source_document_number ~ '^[0-9]{11}$'),
     CONSTRAINT ck_source_nightly_limit_amount CHECK (nightly_limit_cents > 0),
     CONSTRAINT ck_source_nightly_limit_effective_after_request CHECK (effective_at >= requested_at)
 );
 
-CREATE INDEX ix_source_nightly_limit_source ON source_nightly_limit(source_document, effective_at);
+CREATE INDEX ix_source_nightly_limit_source_document_number ON source_nightly_limit(source_document_number, effective_at);
 
 CREATE VIEW accepted_pix AS
 SELECT
     pix_analysis.*,
-    CASE WHEN decision.enumerator = 'approved' THEN 'direct' ELSE 'two_factor' END AS acceptance
+    CASE WHEN decision.enumerator = 'approved' THEN 'direct' ELSE 'two_factor' END AS acceptance_path
 FROM pix_analysis
 JOIN decision ON decision.id = pix_analysis.decision_id
 LEFT JOIN two_factor_confirmation ON two_factor_confirmation.pix_analysis_id = pix_analysis.id
 WHERE decision.enumerator = 'approved'
    OR (decision.enumerator = 'two_factor_required' AND two_factor_confirmation.result = 'confirmed');
 
-CREATE FUNCTION refuse_change() RETURNS trigger AS $$
+CREATE FUNCTION refuse_non_insert_change() RETURNS trigger AS $$
 BEGIN
     RAISE EXCEPTION 'A tabela % aceita apenas INSERT', TG_TABLE_NAME;
 END;
@@ -267,11 +267,11 @@ BEGIN
     ]
     LOOP
         EXECUTE format(
-            'CREATE TRIGGER tr_%1$s_refuse_update_delete BEFORE UPDATE OR DELETE ON %1$I FOR EACH ROW EXECUTE FUNCTION refuse_change()',
+            'CREATE TRIGGER tr_%1$s_refuse_update_delete BEFORE UPDATE OR DELETE ON %1$I FOR EACH ROW EXECUTE FUNCTION refuse_non_insert_change()',
             insert_only_table
         );
         EXECUTE format(
-            'CREATE TRIGGER tr_%1$s_refuse_truncate BEFORE TRUNCATE ON %1$I FOR EACH STATEMENT EXECUTE FUNCTION refuse_change()',
+            'CREATE TRIGGER tr_%1$s_refuse_truncate BEFORE TRUNCATE ON %1$I FOR EACH STATEMENT EXECUTE FUNCTION refuse_non_insert_change()',
             insert_only_table
         );
     END LOOP;
@@ -283,7 +283,7 @@ INSERT INTO decision (enumerator) VALUES
 ('two_factor_required'),
 ('rejected');
 
-INSERT INTO rule (code, kind, family, counterparty_signal, forced_decision_id, threshold_unit, uses_window, uses_company_threshold, description)
+INSERT INTO rule (code, kind, family, counterparty_signal, forced_decision_id, threshold_unit, uses_window_minutes, uses_company_threshold, description)
 SELECT
     catalog.code,
     catalog.kind,
@@ -291,7 +291,7 @@ SELECT
     catalog.counterparty_signal,
     decision.id,
     catalog.threshold_unit,
-    catalog.uses_window,
+    catalog.uses_window_minutes,
     catalog.uses_company_threshold,
     catalog.description
 FROM (VALUES
@@ -319,7 +319,7 @@ FROM (VALUES
     ('same_owner', 'reducer', NULL, NULL, NULL, NULL, false, false, 'Documento do pagador igual ao do recebedor.'),
     ('known_destination', 'reducer', NULL, NULL, NULL, 'count', false, false, 'Recebedor com vários Pix aceitos do pagador.'),
     ('long_registered_device', 'reducer', NULL, NULL, NULL, 'days', false, false, 'Dispositivo cadastrado há muito tempo.')
-) AS catalog(code, kind, family, counterparty_signal, forced_decision, threshold_unit, uses_window, uses_company_threshold, description)
+) AS catalog(code, kind, family, counterparty_signal, forced_decision, threshold_unit, uses_window_minutes, uses_company_threshold, description)
 LEFT JOIN decision ON decision.enumerator = catalog.forced_decision;
 
 INSERT INTO risk_policy (name, kind) VALUES
@@ -330,12 +330,12 @@ INSERT INTO risk_policy (name, kind) VALUES
 
 INSERT INTO risk_policy_version (
     risk_policy_id,
-    version,
+    version_number,
     based_on_version_id,
     change_reason,
     history_window_days,
-    source_history_weight,
-    population_median_weight,
+    source_baseline_reference_weight,
+    population_median_reference_weight,
     reference_average_ticket_individual_to_individual_cents,
     reference_average_ticket_individual_to_company_cents,
     reference_average_ticket_company_to_individual_cents,
@@ -353,7 +353,7 @@ INSERT INTO risk_policy_version (
     two_factor_score_threshold,
     rejection_score_threshold,
     two_factor_validity_minutes,
-    destination_alert_threshold,
+    destination_risk_alert_threshold,
     short_term_window_minutes
 )
 SELECT
@@ -371,23 +371,23 @@ SELECT
     template.two_factor_score_threshold,
     template.rejection_score_threshold,
     10,
-    template.destination_alert_threshold,
+    template.destination_risk_alert_threshold,
     1440
 FROM (VALUES
     ('conservative', 'Modelo conservador', 105, 35, 60, 25),
     ('balanced', 'Modelo equilibrado', 65, 40, 70, 30),
     ('permissive', 'Modelo permissivo', 75, 45, 80, 30)
-) AS template(name, change_reason, behavior_score_cap, two_factor_score_threshold, rejection_score_threshold, destination_alert_threshold)
+) AS template(name, change_reason, behavior_score_cap, two_factor_score_threshold, rejection_score_threshold, destination_risk_alert_threshold)
 JOIN risk_policy ON risk_policy.name = template.name;
 
 INSERT INTO risk_policy_version (
     risk_policy_id,
-    version,
+    version_number,
     based_on_version_id,
     change_reason,
     history_window_days,
-    source_history_weight,
-    population_median_weight,
+    source_baseline_reference_weight,
+    population_median_reference_weight,
     reference_average_ticket_individual_to_individual_cents,
     reference_average_ticket_individual_to_company_cents,
     reference_average_ticket_company_to_individual_cents,
@@ -405,7 +405,7 @@ INSERT INTO risk_policy_version (
     two_factor_score_threshold,
     rejection_score_threshold,
     two_factor_validity_minutes,
-    destination_alert_threshold,
+    destination_risk_alert_threshold,
     short_term_window_minutes
 )
 SELECT
@@ -414,8 +414,8 @@ SELECT
     balanced_version.id,
     'Versão inicial, copiada do modelo equilibrado',
     balanced_version.history_window_days,
-    balanced_version.source_history_weight,
-    balanced_version.population_median_weight,
+    balanced_version.source_baseline_reference_weight,
+    balanced_version.population_median_reference_weight,
     balanced_version.reference_average_ticket_individual_to_individual_cents,
     balanced_version.reference_average_ticket_individual_to_company_cents,
     balanced_version.reference_average_ticket_company_to_individual_cents,
@@ -433,17 +433,17 @@ SELECT
     balanced_version.two_factor_score_threshold,
     balanced_version.rejection_score_threshold,
     balanced_version.two_factor_validity_minutes,
-    balanced_version.destination_alert_threshold,
+    balanced_version.destination_risk_alert_threshold,
     balanced_version.short_term_window_minutes
 FROM risk_policy AS bank_policy
 JOIN risk_policy AS balanced_policy ON balanced_policy.name = 'balanced'
-JOIN risk_policy_version AS balanced_version ON balanced_version.risk_policy_id = balanced_policy.id AND balanced_version.version = 1
+JOIN risk_policy_version AS balanced_version ON balanced_version.risk_policy_id = balanced_policy.id AND balanced_version.version_number = 1
 WHERE bank_policy.name = 'bank';
 
-INSERT INTO risk_policy_guardrail (parameter_name, loosening_direction, refusal_limit) VALUES
+INSERT INTO risk_policy_guardrail (policy_parameter_name, loosening_direction, loosest_accepted_value) VALUES
 ('two_factor_score_threshold', 'higher', 45),
 ('rejection_score_threshold', 'higher', 80),
-('destination_alert_threshold', 'higher', 30),
+('destination_risk_alert_threshold', 'higher', 30),
 ('amount_rules_floor_cents', 'higher', 500000),
 ('new_account_age_days', 'lower', 15),
 ('new_account_cap_individual_cents', 'higher', 200000),
@@ -456,13 +456,13 @@ INSERT INTO risk_policy_guardrail (parameter_name, loosening_direction, refusal_
 ('counterparty_relationship_cap', 'lower', NULL),
 ('behavior_score_cap', 'lower', NULL);
 
-INSERT INTO risk_policy_guardrail (rule_id, setting_field, loosening_direction, refusal_limit)
+INSERT INTO risk_policy_guardrail (rule_id, rule_setting_field, loosening_direction, loosest_accepted_value)
 SELECT rule.id, 'points', 'lower', NULL
 FROM rule
 WHERE rule.kind IN ('scoring', 'reducer');
 
-INSERT INTO risk_policy_guardrail (rule_id, setting_field, loosening_direction, refusal_limit)
-SELECT rule.id, limit_row.setting_field, limit_row.loosening_direction, limit_row.refusal_limit
+INSERT INTO risk_policy_guardrail (rule_id, rule_setting_field, loosening_direction, loosest_accepted_value)
+SELECT rule.id, limit_row.rule_setting_field, limit_row.loosening_direction, limit_row.loosest_accepted_value
 FROM (VALUES
     ('device_used_by_many_sources', 'threshold', 'higher', 8::NUMERIC),
     ('impossible_travel_on_unregistered_device', 'threshold', 'higher', 1200),
@@ -486,7 +486,7 @@ FROM (VALUES
     ('destination_document_in_many_accounts', 'company_threshold', 'higher', 15),
     ('known_destination', 'threshold', 'lower', 2),
     ('long_registered_device', 'threshold', 'lower', 15)
-) AS limit_row(rule_code, setting_field, loosening_direction, refusal_limit)
+) AS limit_row(rule_code, rule_setting_field, loosening_direction, loosest_accepted_value)
 JOIN rule ON rule.code = limit_row.rule_code;
 
 INSERT INTO risk_policy_rule_setting (risk_policy_version_id, rule_id, enabled, points, threshold, window_minutes, company_threshold)

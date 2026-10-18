@@ -4,7 +4,7 @@
     "additionalProperties": false,
     "required": ["change_reason"],
     "dependencies": {
-        "acknowledged_risk": ["requested_by"]
+        "risk_acknowledged": ["requested_by"]
     },
     "properties": {
         "change_reason": {
@@ -17,7 +17,7 @@
             "maxLength": 100,
             "pattern": "\\S"
         },
-        "acknowledged_risk": {
+        "risk_acknowledged": {
             "type": "boolean"
         },
         "based_on_template": {
@@ -29,8 +29,8 @@
             "additionalProperties": false,
             "properties": {
                 "history_window_days": {"type": "integer", "minimum": 1, "maximum": 3650},
-                "source_history_weight": {"type": "integer", "minimum": 1, "maximum": 1000},
-                "population_median_weight": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "source_baseline_reference_weight": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "population_median_reference_weight": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "reference_average_ticket_individual_to_individual_cents": {"$ref": "definitions.json#/definitions/amount_cents"},
                 "reference_average_ticket_individual_to_company_cents": {"$ref": "definitions.json#/definitions/amount_cents"},
                 "reference_average_ticket_company_to_individual_cents": {"$ref": "definitions.json#/definitions/amount_cents"},
@@ -48,7 +48,7 @@
                 "two_factor_score_threshold": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "rejection_score_threshold": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "two_factor_validity_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
-                "destination_alert_threshold": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "destination_risk_alert_threshold": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "short_term_window_minutes": {"type": "integer", "minimum": 1, "maximum": 43200}
             }
         },

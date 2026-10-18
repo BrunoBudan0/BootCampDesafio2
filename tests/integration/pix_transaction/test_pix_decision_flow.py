@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import timedelta
 
-from tests.utils.assertions import rule_codes, rule_hit
+from tests.utils.assertions import fired_rule_codes, fired_rule_hit
 from tests.utils.clock import business_hours_today, now_in_sao_paulo, parse_iso, today_at
 from tests.utils.pix_payload import (
     new_company_payee,
@@ -15,9 +15,9 @@ from tests.utils.pix_payload import (
 from tests.utils.request_generator import RequestGenerator
 from tests.utils.scenario import (
     analyze,
-    counterparty_rejected_pix,
+    pix_rejected_with_counterparty_signal,
     current_bank_policy,
-    fire_together,
+    send_all_at_the_same_time,
     new_account_payer,
     payer_with_accepted_history,
 )
@@ -52,7 +52,7 @@ class TestPixDecisionFlow:
 
         assert analysis["status"] == "approved"
         assert analysis["metadata"]["risk_score"] == 0
-        assert analysis["metadata"]["destination_risk"] == 0
+        assert analysis["metadata"]["destination_risk_score"] == 0
         assert analysis["metadata"]["rules"] == []
         assert analysis["metadata"]["alerts"] == []
         assert analysis["metadata"]["two_factor"] is None
@@ -64,8 +64,8 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date))
 
-        assert {"destination_account_opened_very_recently", "destination_receiving_from_many_sources", "destination_document_in_many_accounts"} <= rule_codes(analysis)
-        assert analysis["metadata"]["destination_risk"] == 85
+        assert {"destination_account_opened_very_recently", "destination_receiving_from_many_sources", "destination_document_in_many_accounts"} <= fired_rule_codes(analysis)
+        assert analysis["metadata"]["destination_risk_score"] == 85
         assert analysis["metadata"]["risk_score"] == 70
 
     def test_destination_risk_adds_counterparty_points_without_the_cap(self):
@@ -75,7 +75,7 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date))
 
-        assert analysis["metadata"]["destination_risk"] == 55
+        assert analysis["metadata"]["destination_risk_score"] == 55
 
     def test_reducers_subtract_from_the_score(self):
         transaction_date = business_hours_today()
@@ -83,9 +83,9 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer, payee_owned_by(payer, opening_date=transaction_date - timedelta(days=3)), transaction_date))
 
-        assert {"destination_account_opened_very_recently", "same_owner"} <= rule_codes(analysis)
+        assert {"destination_account_opened_very_recently", "same_owner"} <= fired_rule_codes(analysis)
         assert analysis["metadata"]["risk_score"] == 0
-        assert analysis["metadata"]["destination_risk"] == 0
+        assert analysis["metadata"]["destination_risk_score"] == 0
         assert analysis["status"] == "approved"
 
     def test_score_never_goes_below_zero(self):
@@ -93,7 +93,7 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer, payee_owned_by(payer), business_hours_today()))
 
-        assert rule_hit(analysis, "same_owner")["points"] == -30
+        assert fired_rule_hit(analysis, "same_owner")["points"] == -30
         assert analysis["metadata"]["risk_score"] == 0
 
     def test_score_from_seventy_is_rejected(self):
@@ -103,7 +103,7 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(new_account_payer(transaction_date), payee, transaction_date, 150000))
 
-        assert {"new_account_above_cap", "destination_receiving_from_many_sources"} <= rule_codes(analysis)
+        assert {"new_account_above_cap", "destination_receiving_from_many_sources"} <= fired_rule_codes(analysis)
         assert analysis["metadata"]["risk_score"] >= 70
         assert analysis["status"] == "rejected"
 
@@ -113,7 +113,7 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(new_account_payer(transaction_date), payee, transaction_date, 150000))
 
-        assert {"new_account_above_cap", "destination_account_opened_very_recently", "new_destination_above_usual_ceiling"} <= rule_codes(analysis)
+        assert {"new_account_above_cap", "destination_account_opened_very_recently", "new_destination_above_usual_ceiling"} <= fired_rule_codes(analysis)
         assert analysis["metadata"]["risk_score"] == 65
         assert analysis["status"] == "two_factor_required"
 
@@ -123,22 +123,22 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer, very_recent_individual_payee(transaction_date), transaction_date, 40000))
 
-        assert rule_codes(analysis) == {"destination_account_opened_very_recently", "new_destination_above_usual_ceiling"}
-        assert analysis["metadata"]["destination_risk"] == 55
+        assert fired_rule_codes(analysis) == {"destination_account_opened_very_recently", "new_destination_above_usual_ceiling"}
+        assert analysis["metadata"]["destination_risk_score"] == 55
         assert analysis["metadata"]["risk_score"] == 30
 
     def test_destination_flagged_by_the_base_is_rejected_even_for_a_usual_amount(self):
         transaction_date = business_hours_today()
         payee = new_individual_payee()
         for minutes_ago in (50, 45):
-            counterparty_rejected_pix(same_payee_in_another_account(payee), transaction_date - timedelta(minutes=minutes_ago))
+            pix_rejected_with_counterparty_signal(same_payee_in_another_account(payee), transaction_date - timedelta(minutes=minutes_ago))
         other_payers_paying_in_other_accounts(payee, transaction_date, 2)
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
 
         analysis = analyze(pix_payload(payer, payee, transaction_date, 10000))
 
-        assert {"destination_receiving_from_many_sources", "destination_document_in_many_accounts", "destination_rejected_for_other_sources"} <= rule_codes(analysis)
-        assert "new_destination_above_usual_ceiling" not in rule_codes(analysis)
+        assert {"destination_receiving_from_many_sources", "destination_document_in_many_accounts", "destination_rejected_for_other_sources"} <= fired_rule_codes(analysis)
+        assert "new_destination_above_usual_ceiling" not in fired_rule_codes(analysis)
         assert analysis["status"] == "rejected"
 
     def test_registered_device_does_not_abate_amount_and_counterparty_points(self):
@@ -147,8 +147,8 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 300000))
 
-        behavior_points = sum(hit["points"] for hit in analysis["metadata"]["rules"] if hit["family"] in ("amount", "counterparty"))
-        assert "long_registered_device" in rule_codes(analysis)
+        behavior_points = sum(fired_rule["points"] for fired_rule in analysis["metadata"]["rules"] if fired_rule["family"] in ("amount", "counterparty"))
+        assert "long_registered_device" in fired_rule_codes(analysis)
         assert analysis["metadata"]["risk_score"] == behavior_points
 
     def test_known_destination_does_not_abate_amount_points(self):
@@ -157,8 +157,8 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer, known_payee, transaction_date, 300000))
 
-        amount_points = sum(hit["points"] for hit in analysis["metadata"]["rules"] if hit["family"] == "amount")
-        assert "known_destination" in rule_codes(analysis)
+        amount_points = sum(fired_rule["points"] for fired_rule in analysis["metadata"]["rules"] if fired_rule["family"] == "amount")
+        assert "known_destination" in fired_rule_codes(analysis)
         assert amount_points > 0
         assert analysis["metadata"]["risk_score"] == amount_points
 
@@ -168,9 +168,9 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer, payee_owned_by(payer), transaction_date, 3000000))
 
-        amount_points = sum(hit["points"] for hit in analysis["metadata"]["rules"] if hit["family"] == "amount")
-        assert {"same_owner", "new_destination_above_usual_ceiling"} <= rule_codes(analysis)
-        assert analysis["metadata"]["risk_score"] == max(0, amount_points + rule_hit(analysis, "same_owner")["points"])
+        amount_points = sum(fired_rule["points"] for fired_rule in analysis["metadata"]["rules"] if fired_rule["family"] == "amount")
+        assert {"same_owner", "new_destination_above_usual_ceiling"} <= fired_rule_codes(analysis)
+        assert analysis["metadata"]["risk_score"] == max(0, amount_points + fired_rule_hit(analysis, "same_owner")["points"])
 
     def test_score_from_forty_to_sixty_nine_asks_two_factor(self):
         transaction_date = business_hours_today()
@@ -186,16 +186,16 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer_on_another_device(payer), payee, transaction_date, 30000))
 
-        assert rule_hit(analysis, "unregistered_device_limit_exceeded")["points"] == 0
+        assert fired_rule_hit(analysis, "unregistered_device_limit_exceeded")["points"] == 0
         assert analysis["metadata"]["risk_score"] < 40
         assert analysis["status"] == "two_factor_required"
 
     def test_nightly_limit_rejection_wins_over_a_low_score_and_keeps_the_score(self):
-        night = today_at(23)
+        night_transaction_date = today_at(23)
 
-        analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), night, 150000))
+        analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), night_transaction_date, 150000))
 
-        assert "nightly_limit_exceeded" in rule_codes(analysis)
+        assert "nightly_limit_exceeded" in fired_rule_codes(analysis)
         assert analysis["metadata"]["risk_score"] is not None
         assert analysis["metadata"]["risk_score"] < 70
         assert analysis["status"] == "rejected"
@@ -213,9 +213,9 @@ class TestPixDecisionFlow:
         analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date, device_id=shared_device))
 
         assert analysis["status"] == "rejected"
-        assert rule_codes(analysis) == {"device_used_by_many_sources"}
+        assert fired_rule_codes(analysis) == {"device_used_by_many_sources"}
         assert analysis["metadata"]["risk_score"] is None
-        assert analysis["metadata"]["destination_risk"] is None
+        assert analysis["metadata"]["destination_risk_score"] is None
 
     def test_two_factor_expires_ten_minutes_after_the_transaction_date(self):
         transaction_date = business_hours_today()
@@ -237,12 +237,12 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(new_individual_payer(), very_recent_individual_payee(transaction_date), transaction_date))
 
-        hit = rule_hit(analysis, "destination_account_opened_very_recently")
-        assert set(hit) == RULE_HIT_FIELDS
-        assert hit["kind"] == "scoring"
-        assert hit["family"] == "counterparty"
-        assert hit["points"] == 25
-        assert hit["reason"].strip()
+        fired_rule = fired_rule_hit(analysis, "destination_account_opened_very_recently")
+        assert set(fired_rule) == RULE_HIT_FIELDS
+        assert fired_rule["kind"] == "scoring"
+        assert fired_rule["family"] == "counterparty"
+        assert fired_rule["points"] == 25
+        assert fired_rule["reason"].strip()
 
     def test_destination_risk_from_thirty_raises_an_alert_without_changing_the_decision(self):
         transaction_date = business_hours_today()
@@ -252,14 +252,14 @@ class TestPixDecisionFlow:
         analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date))
 
         assert analysis["status"] == "approved"
-        assert analysis["metadata"]["alerts"] == [{"code": "destination_alert", "destination_risk": 30, "threshold": 30}]
+        assert analysis["metadata"]["alerts"] == [{"code": "destination_alert", "destination_risk_score": 30, "threshold": 30}]
 
     def test_very_recent_destination_account_alone_raises_no_alert(self):
         transaction_date = business_hours_today()
 
         analysis = analyze(pix_payload(new_individual_payer(), very_recent_individual_payee(transaction_date), transaction_date))
 
-        assert analysis["metadata"]["destination_risk"] == 25
+        assert analysis["metadata"]["destination_risk_score"] == 25
         assert analysis["metadata"]["alerts"] == []
 
     def test_reducers_do_not_abate_signals_seen_by_the_whole_base(self):
@@ -270,9 +270,9 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer, own_account, transaction_date))
 
-        assert {"destination_receiving_from_many_sources", "same_owner"} <= rule_codes(analysis)
+        assert {"destination_receiving_from_many_sources", "same_owner"} <= fired_rule_codes(analysis)
         assert analysis["metadata"]["risk_score"] == 30
-        assert analysis["metadata"]["destination_risk"] == 30
+        assert analysis["metadata"]["destination_risk_score"] == 30
 
     def test_known_destination_abates_the_relationship_signals(self):
         transaction_date = business_hours_today()
@@ -281,16 +281,16 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(payer, new_account_of_the_payee, transaction_date))
 
-        assert {"destination_account_opened_very_recently", "known_destination"} <= rule_codes(analysis)
-        assert analysis["metadata"]["destination_risk"] == 5
+        assert {"destination_account_opened_very_recently", "known_destination"} <= fired_rule_codes(analysis)
+        assert analysis["metadata"]["destination_risk_score"] == 5
 
     def test_eliminatory_rule_hides_a_regulatory_rule_that_would_also_fire(self):
-        night = today_at(23)
+        night_transaction_date = today_at(23)
 
-        analysis = analyze(pix_payload(new_account_payer(night), new_individual_payee(), night, 500001))
+        analysis = analyze(pix_payload(new_account_payer(night_transaction_date), new_individual_payee(), night_transaction_date, 500001))
 
         assert analysis["status"] == "rejected"
-        assert rule_codes(analysis) == {"new_account_to_new_destination_far_above_cap"}
+        assert fired_rule_codes(analysis) == {"new_account_to_new_destination_far_above_cap"}
 
     def test_destination_risk_below_thirty_raises_no_alert(self):
         transaction_date = business_hours_today()
@@ -298,7 +298,7 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date))
 
-        assert analysis["metadata"]["destination_risk"] == 20
+        assert analysis["metadata"]["destination_risk_score"] == 20
         assert analysis["metadata"]["alerts"] == []
 
     def test_parallel_pix_of_the_same_payer_see_each_other(self):
@@ -306,10 +306,10 @@ class TestPixDecisionFlow:
         payer = new_individual_payer()
         payloads = [pix_payload(payer, new_company_payee(), transaction_date) for _ in range(5)]
 
-        responses = fire_together([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
+        responses = send_all_at_the_same_time([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
 
         assert [status for status, _ in responses] == [201] * 5
-        burst_hits = [body for status, body in responses if "burst_of_pix" in rule_codes(body)]
+        burst_hits = [body for status, body in responses if "burst_of_pix" in fired_rule_codes(body)]
         assert len(burst_hits) == 1
 
     def test_parallel_payers_on_the_same_device_see_each_other(self):
@@ -317,10 +317,10 @@ class TestPixDecisionFlow:
         shared_device = new_individual_payer().device_id
         payloads = [pix_payload(new_individual_payer(), new_individual_payee(), transaction_date, device_id=shared_device) for _ in range(5)]
 
-        responses = fire_together([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
+        responses = send_all_at_the_same_time([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
 
         assert [status for status, _ in responses] == [201] * 5
-        rejected_by_shared_device = [body for _, body in responses if "device_used_by_many_sources" in rule_codes(body)]
+        rejected_by_shared_device = [body for _, body in responses if "device_used_by_many_sources" in fired_rule_codes(body)]
         assert len(rejected_by_shared_device) == 1
         assert rejected_by_shared_device[0]["status"] == "rejected"
 
@@ -329,8 +329,8 @@ class TestPixDecisionFlow:
         payee = new_individual_payee()
         payloads = [pix_payload(new_individual_payer(), payee, transaction_date) for _ in range(5)]
 
-        responses = fire_together([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
+        responses = send_all_at_the_same_time([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
 
         assert [status for status, _ in responses] == [201] * 5
-        fan_in_hits = [body for _, body in responses if "destination_receiving_from_many_sources" in rule_codes(body)]
+        fan_in_hits = [body for _, body in responses if "destination_receiving_from_many_sources" in fired_rule_codes(body)]
         assert len(fan_in_hits) == 1

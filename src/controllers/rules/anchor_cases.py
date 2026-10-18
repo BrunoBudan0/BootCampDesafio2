@@ -2,10 +2,10 @@ from dataclasses import dataclass
 
 from controllers.rules.catalog import RuleHit
 from controllers.rules.credibility import points_weighted_by_history
-from controllers.rules.decision import SEVERITY, AnalysisDecision
+from controllers.rules.decision import DECISION_SEVERITY, AnalysisDecision
 
 
-ANCHOR_HISTORY_COUNT = 20
+ANCHOR_CASE_ACCEPTED_HISTORY_COUNT = 20
 
 
 @dataclass(frozen=True)
@@ -23,8 +23,8 @@ class AnchorOutcome:
     risk_score: int
     raises_alert: bool
 
-    def meets(self, anchor_case: AnchorCase) -> bool:
-        reaches_the_decision = SEVERITY[self.decision] >= SEVERITY[anchor_case.minimum_decision]
+    def reaches_the_minimum_of(self, anchor_case: AnchorCase) -> bool:
+        reaches_the_decision = DECISION_SEVERITY[self.decision] >= DECISION_SEVERITY[anchor_case.minimum_decision]
         return reaches_the_decision and (self.raises_alert or not anchor_case.requires_alert)
 
 
@@ -61,7 +61,7 @@ ANCHOR_CASES = (
 
 def anchor_case_points(setting) -> int:
     if setting.rule.threshold_unit == "credibility_weight":
-        return points_weighted_by_history(setting.points, ANCHOR_HISTORY_COUNT, setting.threshold)
+        return points_weighted_by_history(setting.points, ANCHOR_CASE_ACCEPTED_HISTORY_COUNT, setting.threshold)
 
     return setting.points
 
@@ -73,12 +73,12 @@ def anchor_case_outcome(anchor_case: AnchorCase, version, rules_by_code: dict) -
         for code in anchor_case.rule_codes
         if settings_by_code[code].enabled
     ]
-    decision = AnalysisDecision(rules_by_code)
-    parts = decision.score_parts(rule_hits)
-    risk_score = decision.risk_score(parts, version)
+    analysis_decision = AnalysisDecision(rules_by_code)
+    score_parts = analysis_decision.score_parts_of(rule_hits)
+    risk_score = analysis_decision.risk_score(score_parts, version)
 
     return AnchorOutcome(
-        decision=decision.score_band(risk_score, version),
+        decision=analysis_decision.decision_for_risk_score(risk_score, version),
         risk_score=risk_score,
-        raises_alert=decision.destination_risk(parts) >= version.destination_alert_threshold,
+        raises_alert=analysis_decision.destination_risk_score(score_parts) >= version.destination_risk_alert_threshold,
     )

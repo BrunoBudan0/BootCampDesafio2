@@ -18,7 +18,7 @@ def policy_reference(version: Optional[RiskPolicyVersion]) -> Optional[dict]:
     if version is None:
         return None
 
-    return {"name": version.risk_policy.name, "version": version.version}
+    return {"name": version.risk_policy.name, "version": version.version_number}
 
 
 def rule_setting_response(setting: RiskPolicyRuleSetting) -> dict:
@@ -37,7 +37,7 @@ def rule_setting_response(setting: RiskPolicyRuleSetting) -> dict:
 def risk_policy_response(version: RiskPolicyVersion) -> dict:
     return {
         "name": version.risk_policy.name,
-        "version": version.version,
+        "version": version.version_number,
         "change_reason": version.change_reason,
         "requested_by": version.requested_by,
         "risk_acknowledged": version.risk_acknowledged,
@@ -66,7 +66,7 @@ def guardrails_response(guardrails: list, reference_version: RiskPolicyVersion, 
                 "setting": guardrail.setting_name,
                 "loosens_when": guardrail.loosening_direction,
                 "recommended": setting_value_response(guardrail.value_in(reference_version)),
-                "refusal_limit": setting_value_response(guardrail.refusal_limit),
+                "loosest_accepted_value": setting_value_response(guardrail.loosest_accepted_value),
             }
             for guardrail in guardrails
         ],

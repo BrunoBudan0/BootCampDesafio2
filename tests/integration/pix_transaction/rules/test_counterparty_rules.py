@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, rule_codes, rule_hit
+from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, fired_rule_codes, fired_rule_hit
 from tests.utils.clock import business_hours_today, today_at
 from tests.utils.pix_payload import (
     new_company_payee,
@@ -13,12 +13,12 @@ from tests.utils.pix_payload import (
 from tests.utils.scenario import (
     analyze,
     analyze_expecting,
-    confirm_two_factor,
+    answer_two_factor,
     new_account_payer,
-    counterparty_rejected_pix,
-    nightly_rejected_pix,
+    pix_rejected_with_counterparty_signal,
+    pix_rejected_by_nightly_limit,
     payer_with_accepted_history,
-    two_factor_pix,
+    new_account_pix_waiting_two_factor,
 )
 
 
@@ -50,7 +50,7 @@ class TestDestinationAccountAge:
 
         analysis = analyze(pix_payload(new_individual_payer(), payee_opened_days_ago(transaction_date, 6), transaction_date))
 
-        assert rule_hit(analysis, "destination_account_opened_very_recently")["points"] == 25
+        assert fired_rule_hit(analysis, "destination_account_opened_very_recently")["points"] == 25
         assert_rule_not_fired(analysis, "destination_account_opened_recently")
 
     def test_account_opened_seven_days_ago_adds_20_points(self):
@@ -58,7 +58,7 @@ class TestDestinationAccountAge:
 
         analysis = analyze(pix_payload(new_individual_payer(), payee_opened_days_ago(transaction_date, 7), transaction_date))
 
-        assert rule_hit(analysis, "destination_account_opened_recently")["points"] == 20
+        assert fired_rule_hit(analysis, "destination_account_opened_recently")["points"] == 20
         assert_rule_not_fired(analysis, "destination_account_opened_very_recently")
 
     def test_account_opened_29_days_ago_is_still_recent(self):
@@ -95,7 +95,7 @@ class TestNewDestinationAboveUsualCeiling:
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 30001))
 
-        assert rule_hit(analysis, "new_destination_above_usual_ceiling")["points"] == 30
+        assert fired_rule_hit(analysis, "new_destination_above_usual_ceiling")["points"] == 30
 
     def test_new_company_destination_within_three_times_the_ceiling_is_not_suspicious(self):
         transaction_date = business_hours_today()
@@ -167,7 +167,7 @@ class TestNewDestinationAboveUsualCeiling:
         payer, _ = self.history_with_ceiling_of_300_reais(transaction_date)
         large_pix = pix_payload(payer, new_individual_payee(), transaction_date - timedelta(hours=1), 500000)
         analyze_expecting(large_pix, "two_factor_required", "Pix grande para destino novo")
-        confirm_two_factor(large_pix["id"], "confirmed", transaction_date - timedelta(minutes=59))
+        answer_two_factor(large_pix["id"], "confirmed", transaction_date - timedelta(minutes=59))
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 400000))
 
@@ -187,7 +187,7 @@ class TestDestinationReceivingFromManySources:
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date))
 
-        assert rule_hit(analysis, "destination_receiving_from_many_sources")["points"] == 30
+        assert fired_rule_hit(analysis, "destination_receiving_from_many_sources")["points"] == 30
 
     def test_fourth_payer_of_an_individual_is_not_fan_in(self):
         transaction_date = business_hours_today()
@@ -232,16 +232,16 @@ class TestDestinationRejectedForOtherSources:
     def test_destination_rejected_for_two_other_payers_adds_20_points(self):
         payee = new_individual_payee()
         rejected_at = business_hours_today() - timedelta(days=1)
-        counterparty_rejected_pix(payee, rejected_at)
-        counterparty_rejected_pix(payee, rejected_at + timedelta(minutes=5))
+        pix_rejected_with_counterparty_signal(payee, rejected_at)
+        pix_rejected_with_counterparty_signal(payee, rejected_at + timedelta(minutes=5))
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, business_hours_today()))
 
-        assert rule_hit(analysis, "destination_rejected_for_other_sources")["points"] == 20
+        assert fired_rule_hit(analysis, "destination_rejected_for_other_sources")["points"] == 20
 
     def test_destination_rejected_for_one_other_payer_does_not_add_points(self):
         payee = new_individual_payee()
-        counterparty_rejected_pix(payee, business_hours_today() - timedelta(days=1))
+        pix_rejected_with_counterparty_signal(payee, business_hours_today() - timedelta(days=1))
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, business_hours_today()))
 
@@ -251,8 +251,8 @@ class TestDestinationRejectedForOtherSources:
         payee = new_individual_payee()
         rejected_at = business_hours_today() - timedelta(days=1)
         payer = new_account_payer(rejected_at)
-        counterparty_rejected_pix(payee, rejected_at, payer=payer)
-        counterparty_rejected_pix(payee, rejected_at + timedelta(minutes=5), payer=payer)
+        pix_rejected_with_counterparty_signal(payee, rejected_at, payer=payer)
+        pix_rejected_with_counterparty_signal(payee, rejected_at + timedelta(minutes=5), payer=payer)
 
         analysis = analyze(pix_payload(payer, payee, business_hours_today()))
 
@@ -260,7 +260,7 @@ class TestDestinationRejectedForOtherSources:
 
     def test_rejections_without_any_counterparty_signal_do_not_count(self):
         payee = new_individual_payee()
-        night = today_at(23) - timedelta(days=1)
+        night_transaction_date = today_at(23) - timedelta(days=1)
         for minutes_later in (0, 5):
             payer, history_payee, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=4), 1)
             analyze_expecting(
@@ -268,8 +268,8 @@ class TestDestinationRejectedForOtherSources:
                 "approved",
                 "subir o teto habitual do pagador para R$ 2.000",
             )
-            rejected = nightly_rejected_pix(payee, night + timedelta(minutes=minutes_later), payer=payer)
-            assert all(hit["family"] != "counterparty" for hit in rejected["metadata"]["rules"]), (
+            rejected = pix_rejected_by_nightly_limit(payee, night_transaction_date + timedelta(minutes=minutes_later), payer=payer)
+            assert all(fired_rule["family"] != "counterparty" for fired_rule in rejected["metadata"]["rules"]), (
                 "A preparação do cenário falhou: a reprovação pelo limite noturno não devia ter sinal de contraparte"
             )
 
@@ -282,8 +282,8 @@ class TestDestinationRejectedForOtherSources:
         payee = new_individual_payee()
         for minutes_ago in (40, 20):
             started_at = transaction_date - timedelta(minutes=minutes_ago)
-            _, _, payload, _ = two_factor_pix(started_at, payee=payee)
-            confirm_two_factor(payload["id"], "denied", started_at + timedelta(minutes=1))
+            _, _, payload, _ = new_account_pix_waiting_two_factor(started_at, payee=payee)
+            answer_two_factor(payload["id"], "denied", started_at + timedelta(minutes=1))
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date))
 
@@ -292,8 +292,8 @@ class TestDestinationRejectedForOtherSources:
     def test_rejections_older_than_seven_days_do_not_count(self):
         payee = new_individual_payee()
         rejected_at = business_hours_today() - timedelta(days=8)
-        counterparty_rejected_pix(payee, rejected_at)
-        counterparty_rejected_pix(payee, rejected_at + timedelta(minutes=5))
+        pix_rejected_with_counterparty_signal(payee, rejected_at)
+        pix_rejected_with_counterparty_signal(payee, rejected_at + timedelta(minutes=5))
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, business_hours_today()))
 
@@ -302,12 +302,12 @@ class TestDestinationRejectedForOtherSources:
     def test_rejections_in_which_this_rule_fired_do_not_feed_it(self):
         payee = new_individual_payee()
         first_rejections = business_hours_today() - timedelta(days=9)
-        counterparty_rejected_pix(payee, first_rejections)
-        counterparty_rejected_pix(payee, first_rejections + timedelta(minutes=5))
+        pix_rejected_with_counterparty_signal(payee, first_rejections)
+        pix_rejected_with_counterparty_signal(payee, first_rejections + timedelta(minutes=5))
         second_night = today_at(23) - timedelta(days=8)
         for minutes_later in (0, 5):
-            fed_by_the_rule = nightly_rejected_pix(payee, second_night + timedelta(minutes=minutes_later))
-            assert "destination_rejected_for_other_sources" in rule_codes(fed_by_the_rule), (
+            fed_by_the_rule = pix_rejected_by_nightly_limit(payee, second_night + timedelta(minutes=minutes_later))
+            assert "destination_rejected_for_other_sources" in fired_rule_codes(fed_by_the_rule), (
                 "A preparação do cenário falhou: a reprovação da segunda noite devia ter a regra disparada"
             )
 
@@ -324,7 +324,7 @@ class TestDestinationDocumentInManyAccounts:
 
         analysis = analyze(pix_payload(new_individual_payer(), same_payee_in_another_account(payee), transaction_date))
 
-        assert rule_hit(analysis, "destination_document_in_many_accounts")["points"] == 30
+        assert fired_rule_hit(analysis, "destination_document_in_many_accounts")["points"] == 30
 
     def test_the_same_account_paid_many_times_is_one_account(self):
         transaction_date = business_hours_today()
@@ -351,7 +351,7 @@ class TestDestinationDocumentInManyAccounts:
 
         analysis = analyze(pix_payload(new_individual_payer(), same_payee_in_another_account(payee), transaction_date))
 
-        assert rule_hit(analysis, "destination_document_in_many_accounts")["points"] == 30
+        assert fired_rule_hit(analysis, "destination_document_in_many_accounts")["points"] == 30
 
     def test_accounts_used_24_hours_ago_or_more_do_not_count(self):
         transaction_date = business_hours_today()

@@ -38,8 +38,8 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Recebedor | `destination` | Titular da conta de destino, identificado pelo documento | |
 | Conta de origem | `source_account` | Conta de onde sai o Pix: agência, número e data de abertura | Pagador |
 | Conta de destino | `destination_account` | Conta para onde vai o Pix: participante, agência, número e data de abertura | Recebedor |
-| Participante | `participant` | ISPB do banco do recebedor | Banco cliente |
-| Documento | `document` | CPF (11 dígitos) ou CNPJ (14 caracteres, pode ter letras), guardado sem pontuação. É a identidade do histórico | Conta |
+| Participante | `participant`, `destination_participant_ispb` | ISPB do banco do recebedor | Banco cliente |
+| Documento | `document_number` | CPF (11 dígitos) ou CNPJ (14 caracteres, pode ter letras), guardado sem pontuação. É a identidade do histórico | Conta |
 | Tipo de pessoa | `person_type`: `individual`, `company` | Sai do documento. MEI tem CNPJ e por isso é `company` | |
 
 ## O Pix e a análise
@@ -56,7 +56,7 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Aprovado | `approved` | O Pix segue sem fricção | Pix aceito |
 | 2FA solicitado | `two_factor_required` | O motor pede que o pagador confirme que é ele | |
 | Reprovado | `rejected` | O Pix não sai | 2FA recusado |
-| Confirmação de 2FA | `two_factor_confirmation` | Fato informado pelo banco cliente depois do 2FA: o resultado e a data | Decisão |
+| Confirmação de 2FA | `two_factor_confirmation` | Fato informado pelo banco cliente depois do 2FA: o resultado e a data da resposta (`answered_at`) | Decisão |
 | 2FA confirmado | `confirmed` | O pagador provou que é ele | Aprovado |
 | 2FA recusado | `denied` | O pagador não provou. Vira sinal de risco para os próximos Pix dele | Reprovado |
 | Validade do 2FA | `two_factor_validity_minutes`, `two_factor_expires_at` | Prazo para a confirmação chegar, contado da data da transação | |
@@ -106,7 +106,7 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Limiar de reprovação | `rejection_score_threshold` | Pontuação a partir da qual o motor reprova (70) | |
 | Severidade | (ordem) | `rejected` > `two_factor_required` > `approved`. A decisão final é a mais severa entre a faixa da pontuação de risco e as decisões forçadas | |
 | Credibilidade | `credibility_blend` | Quanto o histórico próprio pesa contra uma referência: n / (n + k) | Pontuação de risco |
-| Peso da referência | `k` | Quantos casos próprios valem o mesmo que a referência (5 para o pagador, 30 para a população) | |
+| Peso da referência | `k`: `source_baseline_reference_weight`, `population_median_reference_weight` | Quantos casos próprios valem o mesmo que a referência (5 para o pagador, 30 para a população) | |
 | Mediana do pagador | `source_median_amount` | Mediana dos Pix aceitos do pagador na janela de histórico com o mesmo par pagador → recebedor do Pix analisado (PF→PF, PF→PJ, PJ→PF ou PJ→PJ) | |
 | Ticket médio de referência | `reference_average_ticket_*` | Ticket médio do Pix publicado pelo BCB para cada par pagador → recebedor (PF→PF R$ 268,64; PF→PJ R$ 112,42; PJ→PF R$ 549,58; PJ→PJ R$ 5.404,53). É uma média, não uma mediana | Mediana da população |
 | Mediana da população | `population_median_amount` | Mediana dos Pix aceitos de todos os pagadores com o mesmo par pagador → recebedor, misturada com o ticket médio de referência pela credibilidade | Ticket médio de referência |
@@ -134,21 +134,21 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Alcance do sinal | `rule.counterparty_signal`: `relationship`, `base` | Diz se uma regra de contraparte depende só deste pagador ou de todos os pagadores da instalação | Família |
 | Sinal da relação | `relationship` | Regra de contraparte que depende do que este pagador sabe do recebedor: idade da conta de destino e destino novo acima do teto habitual. Os redutores abatem | Sinal da base |
 | Sinal da base | `base` | Regra de contraparte que depende do que todos os pagadores da instalação viram do recebedor: fan-in, recebedor com reprovações e recebedor em várias contas. Os redutores não abatem, porque o que um pagador sabe do recebedor não apaga o que a base inteira viu | Sinal da relação |
-| Risco do recebedor | `destination_risk` | Pontos dos sinais da relação menos os redutores de mesma titularidade e destino conhecido, nunca abaixo de zero, mais os pontos dos sinais da base. Sem teto | Pontuação de risco |
+| Risco do recebedor | `destination_risk_score` | Pontos dos sinais da relação menos os redutores de mesma titularidade e destino conhecido, nunca abaixo de zero, mais os pontos dos sinais da base. Sem teto | Pontuação de risco |
 | Alerta de recebedor | `destination_alert` | Aviso no `metadata` quando o risco do recebedor atinge o limiar. Não muda a decisão | 2FA |
-| Limiar de alerta | `destination_alert_threshold` | Risco do recebedor a partir do qual sai o alerta (30) | |
+| Limiar de alerta | `destination_risk_alert_threshold` | Risco do recebedor a partir do qual sai o alerta (30) | |
 | Conta laranja | (conceito) | Conta usada para receber e repassar dinheiro de fraude. É o que as regras de contraparte procuram | |
 
 ## Dispositivo e canal
 
 | Termo | No código | Definição | Não confundir com |
 |---|---|---|---|
-| Dispositivo | `device_id` | Aparelho que iniciou o Pix | |
+| Dispositivo | `device_id`, `source_device_id` | Aparelho que iniciou o Pix | |
 | Dispositivo cadastrado | `registered_device` | Aparelho que o motor já reconheceu para aquele pagador | Familiaridade |
 | Origem do cadastro | `registration_origin`: `two_factor`, `first_seen` | 2FA confirmado naquele aparelho, ou primeiro Pix aceito do pagador | |
 | Dispositivo não cadastrado | (estado calculado) | Aparelho sem cadastro para aquele pagador. Sujeito aos limites da Res. BCB 403: R$ 200 por Pix e R$ 1.000 por dia | |
 | Dispositivo compartilhado | `device_used_by_many_sources` | Mesmo aparelho usado por muitos pagadores PF diferentes em pouco tempo. Empresas que pagam pelo mesmo computador, como um escritório de contabilidade, não contam | |
-| Canal | `channel` | Por onde o Pix foi iniciado: `app`, `web` e outros que aparecerem. Texto aberto | Dispositivo |
+| Canal | `channel`, `source_channel` | Por onde o Pix foi iniciado: `app`, `web` e outros que aparecerem. Texto aberto | Dispositivo |
 | Viagem impossível | `impossible_travel` | Pix a mais de 50 km do último Pix aceito do pagador com geolocalização, num deslocamento que exigiria mais de 900 km/h | |
 | Rajada | `burst_of_pix` | Muitos Pix do mesmo pagador em poucos minutos | |
 
@@ -160,6 +160,7 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Modelo de política | `template` | Política pronta (conservadora, equilibrada, permissiva) usada como ponto de partida. Não muda | Política do banco |
 | Política do banco | `bank` | A única política que decide as análises e a única que o banco edita | Modelo de política |
 | Versão | `risk_policy_version` | Estado completo de uma política num momento. Editar cria uma versão nova e nunca altera a anterior | |
+| Número da versão | `version_number` | Sequência da versão dentro da política, a partir de 1. Sai na API como `version` | |
 | Versão vigente | `current_version` | A versão mais recente da política do banco. É a que decide as análises novas | |
 | Ajuste de regra | `risk_policy_rule_setting` | Para cada versão e cada regra editável: ligada ou não, pontos, limite e janela | Parâmetro da política |
 | Parâmetro da política | colunas de `risk_policy_version` | Número que vale para várias regras: janela de histórico, pesos, tetos, limiares, validade do 2FA | Ajuste de regra |

@@ -56,7 +56,7 @@ Catálogo de regras, semeado. Diz o que cada regra é e qual a forma dos seus aj
 | `counterparty_signal` | VARCHAR(15) NULL | CHECK em `relationship`, `base`. Preenchida se e somente se `family = 'counterparty'` |
 | `forced_decision_id` | INTEGER NULL | FK `decision`. Preenchida se e somente se `kind` for `eliminatory` ou `regulatory` |
 | `threshold_unit` | VARCHAR(30) NULL | CHECK em `count`, `days`, `km_per_hour`, `multiplier`, `credibility_weight`. Nula quando a regra não tem limite |
-| `uses_window` | BOOLEAN | A regra tem janela própria em minutos |
+| `uses_window_minutes` | BOOLEAN | A regra tem janela própria em minutos |
 | `uses_company_threshold` | BOOLEAN | A regra tem limite próprio para recebedor PJ (`company_threshold`) |
 | `description` | VARCHAR(255) | Frase em português que vai para o README |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
@@ -80,12 +80,12 @@ Os parâmetros da política, um por coluna, para cada um ter tipo e CHECK própr
 |---|---|---|---|
 | `id` | SERIAL | PK | |
 | `risk_policy_id` | INTEGER | FK `risk_policy` | |
-| `version` | INTEGER | > 0. UNIQUE com `risk_policy_id` | 1 |
+| `version_number` | INTEGER | > 0. UNIQUE com `risk_policy_id`. Sai na API como `version` | 1 |
 | `based_on_version_id` | INTEGER NULL | FK para a própria tabela. Nula só na versão 1 dos modelos | |
 | `change_reason` | VARCHAR(255) | NOT NULL | "Modelo equilibrado" |
 | `history_window_days` | INTEGER | > 0 | 90 |
-| `source_history_weight` | INTEGER | > 0 | 5 |
-| `population_median_weight` | INTEGER | > 0 | 30 |
+| `source_baseline_reference_weight` | INTEGER | > 0. Peso k da mediana da população na base de comparação do pagador | 5 |
+| `population_median_reference_weight` | INTEGER | > 0. Peso k do ticket médio de referência na mediana da população | 30 |
 | `reference_average_ticket_individual_to_individual_cents` | BIGINT | > 0 | 26864 |
 | `reference_average_ticket_individual_to_company_cents` | BIGINT | > 0 | 11242 |
 | `reference_average_ticket_company_to_individual_cents` | BIGINT | > 0 | 54958 |
@@ -103,7 +103,7 @@ Os parâmetros da política, um por coluna, para cada um ter tipo e CHECK própr
 | `two_factor_score_threshold` | INTEGER | > 0 | 40 |
 | `rejection_score_threshold` | INTEGER | > `two_factor_score_threshold` | 70 |
 | `two_factor_validity_minutes` | INTEGER | > 0 | 10 |
-| `destination_alert_threshold` | INTEGER | > 0 | 30 |
+| `destination_risk_alert_threshold` | INTEGER | > 0. Risco do recebedor a partir do qual sai o alerta | 30 |
 | `short_term_window_minutes` | INTEGER | > 0 | 1440 |
 | `requested_by` | VARCHAR(100) NULL | Quem pediu a edição no banco | |
 | `risk_acknowledged` | BOOLEAN | DEFAULT false. Verdadeiro só com `requested_by` preenchido | false |
@@ -122,7 +122,7 @@ Ajuste de cada regra editável em cada versão. Toda versão tem a lista complet
 | `points` | INTEGER NULL | Entre -100 e 100. Preenchida nas regras de pontuação e nos redutores |
 | `threshold` | NUMERIC(12,2) NULL | > 0. Preenchida quando a regra tem `threshold_unit` |
 | `company_threshold` | NUMERIC(12,2) NULL | > 0. Limite próprio quando o recebedor é PJ. Preenchida só nas regras que tratam PJ à parte |
-| `window_minutes` | INTEGER NULL | > 0. Preenchida quando a regra tem `uses_window` |
+| `window_minutes` | INTEGER NULL | > 0. Preenchida quando a regra tem `uses_window_minutes` |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
 
 As regras regulatórias não têm linha aqui: os valores delas são de norma e ficam em constantes no código.
@@ -134,18 +134,18 @@ Faixa de segurança, semeada pela QI e fora do alcance do banco. Diz, para cada 
 | Coluna | Tipo | Restrição |
 |---|---|---|
 | `id` | SERIAL | PK |
-| `parameter_name` | VARCHAR(80) NULL | UNIQUE. Preenchida se e somente se `rule_id` é nula |
-| `rule_id` | INTEGER NULL | FK `rule`. UNIQUE com `setting_field` |
-| `setting_field` | VARCHAR(20) NULL | CHECK em `points`, `threshold`, `company_threshold`, `window_minutes`. Preenchida se e somente se `rule_id` está |
+| `policy_parameter_name` | VARCHAR(80) NULL | UNIQUE. Preenchida se e somente se `rule_id` é nula |
+| `rule_id` | INTEGER NULL | FK `rule`. UNIQUE com `rule_setting_field` |
+| `rule_setting_field` | VARCHAR(20) NULL | CHECK em `points`, `threshold`, `company_threshold`, `window_minutes`. Preenchida se e somente se `rule_id` está |
 | `loosening_direction` | VARCHAR(10) | CHECK em `higher`, `lower`: o lado que deixa passar mais Pix |
-| `refusal_limit` | NUMERIC(14,2) NULL | Além deste valor, a edição é recusada. Nula quando quem decide são os casos-âncora |
+| `loosest_accepted_value` | NUMERIC(14,2) NULL | Além deste valor, a edição é recusada. Nula quando quem decide são os casos-âncora |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
 
 Como a edição é julgada, sempre contra a política de referência (`balanced`, versão 1):
 1. Desligar uma regra eliminatória é recusado (422 QIT001018). Desligar uma regra de pontuação é afrouxar; desligar um redutor é ficar mais rígido.
-2. Valor além do `refusal_limit` é recusado (422 QIT001018). Os limites cobrem o que muda se uma regra dispara: piso, multiplicadores, contagens, idades de conta, tetos de conta nova e os três limiares de decisão.
+2. Valor além do `loosest_accepted_value` é recusado (422 QIT001018). Os limites cobrem o que muda se uma regra dispara: piso, multiplicadores, contagens, idades de conta, tetos de conta nova e os três limiares de decisão.
 3. Pontos, tetos e limiares são julgados pelos casos-âncora: perfis de fraude conhecidos recalculados com a política proposta. Se algum deixa de chegar à decisão mínima, a edição é recusada (422 QIT001019).
-4. Qualquer valor mais frouxo que a referência, dentro dos limites, exige `acknowledged_risk` e `requested_by` (422 QIT001020 sem eles). Ficar mais rígido nunca exige.
+4. Qualquer valor mais frouxo que a referência, dentro dos limites, exige `risk_acknowledged` e `requested_by` (422 QIT001020 sem eles). Ficar mais rígido nunca exige.
 
 | Caso-âncora | Regras | Mínimo |
 |---|---|---|
@@ -168,30 +168,30 @@ Tudo que chegou e a decisão do motor.
 | Valor e tempo | `amount_cents` | BIGINT | > 0 |
 | | `transaction_date` | TIMESTAMPTZ | NOT NULL |
 | | `transaction_utc_offset_minutes` | SMALLINT | Entre -720 e 840. O TIMESTAMPTZ guarda em UTC e perde o fuso; esta coluna preserva o horário local |
-| Origem | `source_document` | VARCHAR(14) | 11 dígitos ou 14 caracteres alfanuméricos maiúsculos |
+| Origem | `source_document_number` | VARCHAR(14) | 11 dígitos ou 14 caracteres alfanuméricos maiúsculos |
 | | `source_person_type` | VARCHAR(10) | CHECK em `individual`, `company`, coerente com o tamanho do documento |
 | | `source_branch` | VARCHAR(10) | |
 | | `source_account_number` | VARCHAR(20) | |
 | | `source_account_opening_date` | TIMESTAMPTZ | |
-| Destino | `destination_participant` | CHAR(8) | Só dígitos (ISPB) |
+| Destino | `destination_participant_ispb` | CHAR(8) | `destination_account.participant`. Só dígitos (ISPB) |
 | | `destination_branch` | VARCHAR(10) | |
 | | `destination_account_number` | VARCHAR(20) | |
 | | `destination_account_opening_date` | TIMESTAMPTZ | |
-| | `destination_document` | VARCHAR(14) | Mesma regra do documento de origem |
+| | `destination_document_number` | VARCHAR(14) | Mesma regra do documento de origem |
 | | `destination_person_type` | VARCHAR(10) | Mesma regra |
-| Dispositivo | `device_id` | VARCHAR(100) | |
-| | `channel` | VARCHAR(30) | Minúsculas, letras, dígitos e `_` |
-| | `ip` | INET | Valida IPv4 e IPv6 |
-| | `latitude` | NUMERIC(8,6) NULL | Entre -90 e 90 |
-| | `longitude` | NUMERIC(9,6) NULL | Entre -180 e 180. Nula junto com a latitude |
+| Dispositivo | `source_device_id` | VARCHAR(100) | `source.device_id` do pedido |
+| | `source_channel` | VARCHAR(30) | `source.channel`. Minúsculas, letras, dígitos e `_` |
+| | `source_ip` | INET | `source.ip`. Valida IPv4 e IPv6 |
+| | `source_latitude` | NUMERIC(8,6) NULL | `source.geolocation.latitude`. Entre -90 e 90 |
+| | `source_longitude` | NUMERIC(9,6) NULL | `source.geolocation.longitude`. Entre -180 e 180. Nula junto com a latitude |
 | Decisão | `decision_id` | INTEGER | FK `decision` |
 | | `risk_score` | INTEGER NULL | >= 0. Nula quando uma regra eliminatória decidiu |
-| | `destination_risk` | INTEGER NULL | >= 0. Risco do recebedor. Nula quando uma regra eliminatória decidiu |
+| | `destination_risk_score` | INTEGER NULL | >= 0. Risco do recebedor. Nula quando uma regra eliminatória decidiu |
 | | `risk_policy_version_id` | INTEGER | FK `risk_policy_version`: a versão que decidiu |
 | | `two_factor_expires_at` | TIMESTAMPTZ NULL | Preenchida só quando a decisão é 2FA. Congela a validade da versão que decidiu |
 | Auditoria | `created_at` | TIMESTAMPTZ | DEFAULT now(). Nenhuma regra lê |
 
-Índices: `(source_document, transaction_date)`, `(destination_document, transaction_date)`, `(device_id, transaction_date)` e `(source_person_type, destination_person_type, transaction_date)`.
+Índices: `(source_document_number, transaction_date)`, `(destination_document_number, transaction_date)`, `(source_device_id, transaction_date)` e `(source_person_type, destination_person_type, transaction_date)`.
 
 ### pix_analysis_rule_hit
 
@@ -211,21 +211,21 @@ Tudo que chegou e a decisão do motor.
 | `id` | BIGSERIAL | PK |
 | `pix_analysis_id` | BIGINT | FK `pix_analysis`. UNIQUE: uma confirmação por análise |
 | `result` | VARCHAR(10) | CHECK em `confirmed`, `denied` |
-| `confirmed_at` | TIMESTAMPTZ | NOT NULL. Vem no corpo do pedido |
+| `answered_at` | TIMESTAMPTZ | NOT NULL. Quando o pagador respondeu ao 2FA, confirmando ou recusando. Vem no corpo do pedido |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
 
-A rota confere que a análise pediu 2FA e que `confirmed_at` fica entre `transaction_date` e `two_factor_expires_at`.
+A rota confere que a análise pediu 2FA e que `answered_at` fica entre `transaction_date` e `two_factor_expires_at`.
 
 ### registered_device
 
 | Coluna | Tipo | Restrição |
 |---|---|---|
 | `id` | BIGSERIAL | PK |
-| `source_document` | VARCHAR(14) | UNIQUE com `device_id` |
+| `source_document_number` | VARCHAR(14) | UNIQUE com `device_id` |
 | `device_id` | VARCHAR(100) | |
 | `registration_origin` | VARCHAR(15) | CHECK em `two_factor`, `first_seen` |
-| `registered_at` | TIMESTAMPTZ | `confirmed_at` do 2FA ou `transaction_date` do primeiro Pix aceito |
-| `pix_analysis_id` | BIGINT | FK `pix_analysis`: a análise que originou o cadastro |
+| `registered_at` | TIMESTAMPTZ | `answered_at` do 2FA ou `transaction_date` do primeiro Pix aceito |
+| `registration_pix_analysis_id` | BIGINT | FK `pix_analysis`: a análise que originou o cadastro |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
 
 ### source_nightly_limit
@@ -235,7 +235,7 @@ Limite noturno do pagador PF quando o banco cliente aprova um valor diferente do
 | Coluna | Tipo | Restrição |
 |---|---|---|
 | `id` | BIGSERIAL | PK |
-| `source_document` | VARCHAR(14) | Só CPF |
+| `source_document_number` | VARCHAR(14) | Só CPF |
 | `nightly_limit_cents` | BIGINT | > 0 |
 | `requested_at` | TIMESTAMPTZ | Quando o pagador pediu |
 | `effective_at` | TIMESTAMPTZ | Aumento: pelo menos 24 h depois do pedido, como manda a norma. Redução: na hora do pedido |
@@ -245,7 +245,7 @@ O limite que vale numa análise sai do pedido mais recente com `requested_at` at
 
 ### accepted_pix (VIEW)
 
-Análises com decisão `approved`, mais as com decisão `two_factor_required` e confirmação `confirmed`. Traz as colunas da análise e `acceptance` (`direct` ou `two_factor`). É de onde saem a mediana do pagador, a mediana da população, os destinos conhecidos, o teto habitual, a familiaridade de IP, local e canal e o volume mensal. Sem contador para atualizar e sempre reconstruível.
+Análises com decisão `approved`, mais as com decisão `two_factor_required` e confirmação `confirmed`. Traz as colunas da análise e `acceptance_path` (`direct` ou `two_factor`). É de onde saem a mediana do pagador, a mediana da população, os destinos conhecidos, o teto habitual, a familiaridade de IP, local e canal e o volume mensal. Sem contador para atualizar e sempre reconstruível.
 
 ## Catálogo de regras e ajustes do modelo equilibrado
 
@@ -287,7 +287,7 @@ Regras de convivência:
 - `destination_receiving_from_many_sources` só conta pagadores cujo Pix atingiu `amount_rules_floor_cents`, para racha de conta e vaquinha de valor baixo não parecerem conta laranja.
 - `amount_above_baseline` e `amount_far_above_baseline` são exclusivas: dispara só a mais grave. O multiplicador da segunda precisa ser maior que o da primeira.
 - `new_destination_above_usual_ceiling` vale 30, acima do limiar de alerta: destino novo bem acima do teto habitual gera alerta sozinho, que é o que a vítima de falsa central precisa ver. Para recebedor PJ, o limite é 3 vezes o teto, para a primeira compra numa loja não gerar alerta à toa.
-- Risco do recebedor: os redutores abatem só os sinais da relação (`counterparty_signal = 'relationship'`). Os sinais da base (`counterparty_signal = 'base'`) entram inteiros. `destination_risk = max(0, sinais da relação - mesma titularidade - destino conhecido) + sinais da base`.
+- Risco do recebedor: os redutores abatem só os sinais da relação (`counterparty_signal = 'relationship'`). Os sinais da base (`counterparty_signal = 'base'`) entram inteiros. `destination_risk_score = max(0, sinais da relação - mesma titularidade - destino conhecido) + sinais da base`.
 - O limite de PJ fica em `company_threshold`: o recebedor PJ em `destination_document_in_many_accounts` e o pagador PJ em `burst_of_pix`, porque empresa paga em lote. O banco muda criando uma versão nova da política.
 - `device_used_by_many_sources` conta só pagadores PF: empresas que pagam pelo mesmo computador, como um escritório de contabilidade, não são uma fazenda de aparelhos.
 - A viagem impossível compara o Pix analisado com o último Pix aceito do pagador com geolocalização, e só a partir de 50 km. Uma tentativa reprovada de um invasor não contamina o próximo Pix do dono, e a imprecisão da localização por wi-fi ou antena não vira viagem.
@@ -299,14 +299,14 @@ Regras de convivência:
 
 ## Como as regras viram decisão
 
-1. Regras eliminatórias. Se alguma dispara, as que dispararam são gravadas, a decisão é `rejected` e a análise termina aqui. `risk_score` e `destination_risk` ficam nulos.
+1. Regras eliminatórias. Se alguma dispara, as que dispararam são gravadas, a decisão é `rejected` e a análise termina aqui. `risk_score` e `destination_risk_score` ficam nulos.
 2. Regras de pontuação e redutores. Cada família é limitada ao seu teto e perde os redutores que a desmentem, sem ficar abaixo de zero: o aparelho cadastrado abate a identidade, o destino conhecido abate os sinais da relação, e a mesma titularidade abate os sinais da relação e o valor.
    - Comportamento = velocidade + valor + relação, limitado a `behavior_score_cap` (65). Os sinais da relação têm antes o próprio teto, `counterparty_relationship_cap` (30).
    - Evidência = identidade + a parte dos sinais da base na contraparte. A contraparte inteira (relação mais base) é limitada a `counterparty_family_cap` (70).
    - Pontuação de risco = identidade + comportamento + parte da base. A faixa sai dos limiares da versão vigente.
    - Consequência: no modelo equilibrado, comportamento atípico sozinho chega no máximo a 65 e pede 2FA. Reprovar exige evidência: dúvida de identidade, sinais da base sobre o recebedor, uma regra eliminatória ou o limite noturno.
 3. Regras regulatórias. O limite noturno estourado reprova; o limite do dispositivo não cadastrado pede no mínimo 2FA. Vale a mais severa entre elas e a faixa da pontuação.
-4. Risco do recebedor. Sinais da relação menos os redutores de mesma titularidade e destino conhecido, nunca abaixo de zero, mais os sinais da base. Se atinge `destination_alert_threshold`, sai um alerta em `metadata.alerts`. Não muda a decisão.
+4. Risco do recebedor. Sinais da relação menos os redutores de mesma titularidade e destino conhecido, nunca abaixo de zero, mais os sinais da base. Se atinge `destination_risk_alert_threshold`, sai um alerta em `metadata.alerts`. Não muda a decisão.
 
 ## Modelos de política (carga inicial)
 
@@ -316,7 +316,7 @@ Regras de convivência:
 |---|---|---|---|
 | `two_factor_score_threshold` | 35 | 40 | 45 |
 | `rejection_score_threshold` | 60 | 70 | 80 |
-| `destination_alert_threshold` | 25 | 30 | 30 |
+| `destination_risk_alert_threshold` | 25 | 30 | 30 |
 | `behavior_score_cap` | 105 (sem limite na prática) | 65 | 75 |
 | `amount_above_baseline` | 3 × | 5 × | 10 × |
 | `amount_far_above_baseline` | 10 × | 20 × | 40 × |
@@ -347,15 +347,15 @@ Regras de convivência:
 | `POST /sources/{document}/nightly-limit` | 201. Corpo: `nightly_limit_cents` e `requested_at`. O banco chama depois de aprovar; o motor calcula `effective_at` |
 | `GET /risk-policy` | Versão vigente: parâmetros e ajustes de regra |
 | `GET /risk-policy/versions/{version}` | Uma versão antiga, para auditoria |
-| `POST /risk-policy/versions` | 201 versão nova. Corpo: `change_reason`, `based_on_template` opcional, `requested_by` e `acknowledged_risk` opcionais, parâmetros e ajustes que mudam. O resto é herdado. Edição simultânea cai no UNIQUE da versão: 409. Faixas de segurança e casos-âncora: 422 |
+| `POST /risk-policy/versions` | 201 versão nova. Corpo: `change_reason`, `based_on_template` opcional, `requested_by` e `risk_acknowledged` opcionais, parâmetros e ajustes que mudam. O resto é herdado. Edição simultânea cai no UNIQUE da versão: 409. Faixas de segurança e casos-âncora: 422 |
 | `GET /risk-policy/guardrails` | A política de referência, as faixas de segurança com o valor recomendado e o limite de cada uma, e os casos-âncora |
 
 ## Garantido pelo código, não pelo banco
 
 - `two_factor_expires_at` preenchido se e somente se a decisão é `two_factor_required`.
 - `risk_policy_version_id` da análise aponta para uma versão da política `bank`, nunca de um modelo.
-- `registered_device.source_document` é o mesmo da análise de origem.
-- O ajuste de cada regra segue o catálogo: limite nulo quando `threshold_unit` é nulo, janela nula quando `uses_window` é falso, e toda versão tem as 22 linhas.
+- `registered_device.source_document_number` é o mesmo da análise de origem.
+- O ajuste de cada regra segue o catálogo: limite nulo quando `threshold_unit` é nulo, janela nula quando `uses_window_minutes` é falso, e toda versão tem as 22 linhas.
 - Fuso, números não finitos e limites com mais de 2 casas são recusados antes do INSERT, para nenhum CHECK virar 500.
 - `GET /risk-policy/templates` entra na entrega: os testes exigem.
 

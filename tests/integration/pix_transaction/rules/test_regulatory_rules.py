@@ -1,6 +1,6 @@
 from datetime import timedelta, timezone
 
-from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, rule_hit
+from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, fired_rule_hit
 from tests.utils.clock import business_hours_today, iso, today_at
 from tests.utils.pix_payload import (
     new_company_payee,
@@ -15,11 +15,11 @@ from tests.utils.scenario import (
     analyze,
     analyze_expecting,
     build_accepted_history,
-    confirm_two_factor,
-    fire_together,
+    answer_two_factor,
+    send_all_at_the_same_time,
     payer_with_accepted_history,
     payer_with_registered_device,
-    setup_ok,
+    assert_scenario_step_succeeded,
 )
 
 
@@ -37,7 +37,7 @@ class TestNightlyLimit:
         analysis = first_pix_tonight(new_individual_payer(), new_individual_payee(), 23, 100001)
 
         assert analysis["status"] == "rejected"
-        assert rule_hit(analysis, "nightly_limit_exceeded")["kind"] == "regulatory"
+        assert fired_rule_hit(analysis, "nightly_limit_exceeded")["kind"] == "regulatory"
 
     def test_split_pix_in_the_same_night_add_up(self):
         payer, _ = payer_with_registered_device()
@@ -98,20 +98,20 @@ class TestNightlyLimit:
         assert_rule_not_fired(sent_with_sao_paulo_offset, "nightly_limit_exceeded")
 
     def test_pending_two_factor_uses_the_nightly_limit(self):
-        night = today_at(23)
+        night_transaction_date = today_at(23)
         payer, payee, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=1), 1)
-        analyze_expecting(pix_payload(payer_on_another_device(payer), payee, night, 90000), "two_factor_required", "Pix no aparelho novo à noite")
+        analyze_expecting(pix_payload(payer_on_another_device(payer), payee, night_transaction_date, 90000), "two_factor_required", "Pix no aparelho novo à noite")
 
-        analysis = analyze(pix_payload(payer, payee, night + timedelta(minutes=5), 20000))
+        analysis = analyze(pix_payload(payer, payee, night_transaction_date + timedelta(minutes=5), 20000))
 
         assert_rule_fired(analysis, "nightly_limit_exceeded")
 
     def test_expired_two_factor_stops_using_the_nightly_limit(self):
-        night = today_at(23)
+        night_transaction_date = today_at(23)
         payer, payee, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=1), 1)
-        analyze_expecting(pix_payload(payer_on_another_device(payer), payee, night, 90000), "two_factor_required", "Pix no aparelho novo à noite")
+        analyze_expecting(pix_payload(payer_on_another_device(payer), payee, night_transaction_date, 90000), "two_factor_required", "Pix no aparelho novo à noite")
 
-        analysis = analyze(pix_payload(payer, payee, night + timedelta(minutes=15), 20000))
+        analysis = analyze(pix_payload(payer, payee, night_transaction_date + timedelta(minutes=15), 20000))
 
         assert_rule_not_fired(analysis, "nightly_limit_exceeded")
 
@@ -127,7 +127,7 @@ class TestNightlyLimit:
         payer, _ = payer_with_registered_device()
         payloads = [pix_payload(payer, new_individual_payee(), today_at(23), 60000) for _ in range(2)]
 
-        responses = fire_together([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
+        responses = send_all_at_the_same_time([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
 
         assert [status for status, _ in responses] == [201, 201]
         assert sorted(body["status"] for _, body in responses) == ["approved", "rejected"]
@@ -210,7 +210,7 @@ class TestUnregisteredDeviceLimit:
         new_device_payer = payer_on_another_device(payer)
         payload = pix_payload(new_device_payer, payee, transaction_date, 30000)
         analyze_expecting(payload, "two_factor_required", "Pix no aparelho novo")
-        confirm_two_factor(payload["id"], "confirmed", transaction_date + timedelta(minutes=2))
+        answer_two_factor(payload["id"], "confirmed", transaction_date + timedelta(minutes=2))
 
         analysis = analyze(pix_payload(new_device_payer, payee, transaction_date + timedelta(minutes=30), 30000))
 
@@ -222,7 +222,7 @@ class TestUnregisteredDeviceLimit:
         new_device_payer = payer_on_another_device(payer)
         payload = pix_payload(new_device_payer, payee, transaction_date, 30000)
         analyze_expecting(payload, "two_factor_required", "Pix no aparelho novo")
-        confirm_two_factor(payload["id"], "denied", transaction_date + timedelta(minutes=2))
+        answer_two_factor(payload["id"], "denied", transaction_date + timedelta(minutes=2))
 
         analysis = analyze(pix_payload(new_device_payer, payee, transaction_date + timedelta(minutes=30), 30000))
 
@@ -237,7 +237,7 @@ class TestApprovedNightlyLimit:
             payer.document_number,
             {"nightly_limit_cents": 500000, "requested_at": iso(requested_at)},
         )
-        setup_ok(status, body, "aprovar o limite noturno de R$ 5.000", expected_statuses=(201,))
+        assert_scenario_step_succeeded(status, body, "aprovar o limite noturno de R$ 5.000", expected_statuses=(201,))
 
         before_effective = analyze(pix_payload(payer, new_individual_payee(), today_at(21, 59), 300000))
         after_effective = analyze(pix_payload(payer, new_individual_payee(), today_at(22, 1), 300000))
@@ -253,7 +253,7 @@ class TestApprovedNightlyLimit:
                 payer.document_number,
                 {"nightly_limit_cents": limit_cents, "requested_at": iso(requested_at)},
             )
-            setup_ok(status, body, f"pedir o limite noturno de {limit_cents} centavos", expected_statuses=(201,))
+            assert_scenario_step_succeeded(status, body, f"pedir o limite noturno de {limit_cents} centavos", expected_statuses=(201,))
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), today_at(22), 60000))
 
@@ -266,7 +266,7 @@ class TestApprovedNightlyLimit:
             payer.document_number,
             {"nightly_limit_cents": 50000, "requested_at": iso(requested_at)},
         )
-        setup_ok(status, body, "reduzir o limite noturno para R$ 500", expected_statuses=(201,))
+        assert_scenario_step_succeeded(status, body, "reduzir o limite noturno para R$ 500", expected_statuses=(201,))
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), today_at(21), 60000))
 

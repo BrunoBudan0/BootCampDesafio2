@@ -9,8 +9,8 @@ class RiskPolicyVersion(Base):
 
     PARAMETER_NAMES = (
         "history_window_days",
-        "source_history_weight",
-        "population_median_weight",
+        "source_baseline_reference_weight",
+        "population_median_reference_weight",
         "reference_average_ticket_individual_to_individual_cents",
         "reference_average_ticket_individual_to_company_cents",
         "reference_average_ticket_company_to_individual_cents",
@@ -28,18 +28,18 @@ class RiskPolicyVersion(Base):
         "two_factor_score_threshold",
         "rejection_score_threshold",
         "two_factor_validity_minutes",
-        "destination_alert_threshold",
+        "destination_risk_alert_threshold",
         "short_term_window_minutes",
     )
 
     id = Column(Integer, primary_key=True)
     risk_policy_id = Column(Integer, ForeignKey("risk_policy.id"), nullable=False)
-    version = Column(Integer, nullable=False)
+    version_number = Column(Integer, nullable=False)
     based_on_version_id = Column(Integer, ForeignKey("risk_policy_version.id"))
     change_reason = Column(String(255), nullable=False)
     history_window_days = Column(Integer, nullable=False)
-    source_history_weight = Column(Integer, nullable=False)
-    population_median_weight = Column(Integer, nullable=False)
+    source_baseline_reference_weight = Column(Integer, nullable=False)
+    population_median_reference_weight = Column(Integer, nullable=False)
     reference_average_ticket_individual_to_individual_cents = Column(BigInteger, nullable=False)
     reference_average_ticket_individual_to_company_cents = Column(BigInteger, nullable=False)
     reference_average_ticket_company_to_individual_cents = Column(BigInteger, nullable=False)
@@ -57,7 +57,7 @@ class RiskPolicyVersion(Base):
     two_factor_score_threshold = Column(Integer, nullable=False)
     rejection_score_threshold = Column(Integer, nullable=False)
     two_factor_validity_minutes = Column(Integer, nullable=False)
-    destination_alert_threshold = Column(Integer, nullable=False)
+    destination_risk_alert_threshold = Column(Integer, nullable=False)
     short_term_window_minutes = Column(Integer, nullable=False)
     requested_by = Column(String(100))
     risk_acknowledged = Column(Boolean, nullable=False, default=False)

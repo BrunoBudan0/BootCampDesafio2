@@ -5,7 +5,7 @@ from uuid import UUID
 
 import pytest
 
-from tests.utils.assertions import assert_error, assert_rule_fired, rule_codes
+from tests.utils.assertions import assert_error, assert_rule_fired, fired_rule_codes
 from tests.utils.clock import business_hours_today, iso
 from tests.utils.pix_payload import (
     new_company_payee,
@@ -20,29 +20,29 @@ from tests.utils.requisition import ClientRequisition
 from tests.utils.scenario import analyze, payer_with_accepted_history
 
 
-DECISIONS = {"approved", "two_factor_required", "rejected"}
-METADATA_FIELDS = {"risk_score", "destination_risk", "policy", "rules", "alerts", "two_factor"}
+DECISION_STATUSES = {"approved", "two_factor_required", "rejected"}
+METADATA_FIELDS = {"risk_score", "destination_risk_score", "policy", "rules", "alerts", "two_factor"}
 
 
 def valid_payload() -> dict:
     return pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today())
 
 
-def changed(payload: dict, path: list, value) -> dict:
+def payload_with_changed_field(payload: dict, field_path: list, new_value) -> dict:
     changed_payload = copy.deepcopy(payload)
-    node = changed_payload
-    for key in path[:-1]:
-        node = node[key]
-    node[path[-1]] = value
+    parent_node = changed_payload
+    for key in field_path[:-1]:
+        parent_node = parent_node[key]
+    parent_node[field_path[-1]] = new_value
     return changed_payload
 
 
-def without(payload: dict, path: list) -> dict:
+def payload_without_field(payload: dict, field_path: list) -> dict:
     changed_payload = copy.deepcopy(payload)
-    node = changed_payload
-    for key in path[:-1]:
-        node = node[key]
-    del node[path[-1]]
+    parent_node = changed_payload
+    for key in field_path[:-1]:
+        parent_node = parent_node[key]
+    del parent_node[field_path[-1]]
     return changed_payload
 
 
@@ -90,7 +90,7 @@ class TestPixTransactionContract:
 
         assert status == 201
         assert body["status"] == "rejected"
-        assert "nightly_limit_exceeded" in rule_codes(body)
+        assert "nightly_limit_exceeded" in fired_rule_codes(body)
 
     def test_new_analysis_returns_uuid_key_known_status_and_full_metadata(self):
         status, body = RequestGenerator.POST_pix_transaction(valid_payload())
@@ -98,7 +98,7 @@ class TestPixTransactionContract:
         assert status == 201
         assert set(body) == {"key", "status", "metadata"}
         assert str(UUID(body["key"])) == body["key"]
-        assert body["status"] in DECISIONS
+        assert body["status"] in DECISION_STATUSES
         assert set(body["metadata"]) == METADATA_FIELDS
 
     @pytest.mark.parametrize(
@@ -128,7 +128,7 @@ class TestPixTransactionContract:
     def test_missing_required_field_is_refused_with_400_and_not_recorded(self, missing_path):
         payload = valid_payload()
 
-        status, body = RequestGenerator.POST_pix_transaction(without(payload, missing_path))
+        status, body = RequestGenerator.POST_pix_transaction(payload_without_field(payload, missing_path))
 
         assert_error(status, body, 400, "QIT000001")
         assert_nothing_was_recorded(payload["id"])
@@ -169,7 +169,7 @@ class TestPixTransactionContract:
     def test_invalid_field_is_refused_with_400_and_not_recorded(self, path, invalid_value):
         payload = valid_payload()
 
-        status, body = RequestGenerator.POST_pix_transaction(changed(payload, path, invalid_value))
+        status, body = RequestGenerator.POST_pix_transaction(payload_with_changed_field(payload, path, invalid_value))
 
         assert_error(status, body, 400, "QIT000001")
         assert_nothing_was_recorded(payload["id"])
@@ -189,7 +189,7 @@ class TestPixTransactionContract:
     def test_date_that_does_not_exist_is_refused_with_422_and_not_recorded(self, path, impossible_date):
         payload = valid_payload()
 
-        status, body = RequestGenerator.POST_pix_transaction(changed(payload, path, impossible_date))
+        status, body = RequestGenerator.POST_pix_transaction(payload_with_changed_field(payload, path, impossible_date))
 
         assert_error(status, body, 422, "QIT001004")
         assert_nothing_was_recorded(payload["id"])
@@ -198,7 +198,7 @@ class TestPixTransactionContract:
     def test_ip_that_does_not_exist_is_refused_with_422_and_not_recorded(self, invalid_ip):
         payload = valid_payload()
 
-        status, body = RequestGenerator.POST_pix_transaction(changed(payload, ["source", "ip"], invalid_ip))
+        status, body = RequestGenerator.POST_pix_transaction(payload_with_changed_field(payload, ["source", "ip"], invalid_ip))
 
         assert_error(status, body, 422, "QIT001005")
         assert_nothing_was_recorded(payload["id"])
@@ -216,7 +216,7 @@ class TestPixTransactionContract:
     def test_document_with_wrong_check_digits_is_refused_with_422_and_not_recorded(self, path, invalid_document):
         payload = valid_payload()
 
-        status, body = RequestGenerator.POST_pix_transaction(changed(payload, path, invalid_document))
+        status, body = RequestGenerator.POST_pix_transaction(payload_with_changed_field(payload, path, invalid_document))
 
         assert_error(status, body, 422, "QIT001003")
         assert_nothing_was_recorded(payload["id"])
@@ -233,7 +233,7 @@ class TestPixTransactionContract:
         assert_nothing_was_recorded(payload["id"])
 
     def test_latitude_that_is_not_a_number_is_refused_with_400_and_not_recorded(self):
-        payload = changed(valid_payload(), ["source", "geolocation"], {"latitude": float("nan"), "longitude": -46.65})
+        payload = payload_with_changed_field(valid_payload(), ["source", "geolocation"], {"latitude": float("nan"), "longitude": -46.65})
 
         response = ClientRequisition.send(
             "POST",
@@ -273,7 +273,7 @@ class TestPixTransactionContract:
         assert status == 201
 
     def test_ipv6_is_accepted(self):
-        payload = changed(valid_payload(), ["source", "ip"], "2001:db8::1")
+        payload = payload_with_changed_field(valid_payload(), ["source", "ip"], "2001:db8::1")
 
         status, body = RequestGenerator.POST_pix_transaction(payload)
 

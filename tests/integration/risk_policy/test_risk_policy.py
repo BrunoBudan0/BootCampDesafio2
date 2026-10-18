@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 
-from tests.utils.assertions import assert_error, assert_rule_fired, assert_rule_not_fired, rule_hit
+from tests.utils.assertions import assert_error, assert_rule_fired, assert_rule_not_fired, fired_rule_hit
 from tests.utils.clock import business_hours_today
 from tests.utils.pix_payload import (
     new_company_payee,
@@ -18,19 +18,19 @@ from tests.utils.scenario import (
     analyze,
     current_bank_policy,
     edit_bank_policy,
-    fire_together,
+    send_all_at_the_same_time,
     payer_with_accepted_history,
     restore_balanced_bank_policy,
 )
 
 
 POLICY_FIELDS = {"name", "version", "change_reason", "requested_by", "risk_acknowledged", "based_on", "parameters", "rules"}
-ACKNOWLEDGED = {"requested_by": "analista.risco@banco.com.br", "acknowledged_risk": True}
+RISK_ACKNOWLEDGEMENT = {"requested_by": "analista.risco@banco.com.br", "risk_acknowledged": True}
 RULE_SETTING_FIELDS = {"code", "kind", "family", "enabled", "points", "threshold", "window_minutes", "company_threshold"}
-PARAMETERS = {
+POLICY_PARAMETER_NAMES = {
     "history_window_days",
-    "source_history_weight",
-    "population_median_weight",
+    "source_baseline_reference_weight",
+    "population_median_reference_weight",
     "reference_average_ticket_individual_to_individual_cents",
     "reference_average_ticket_individual_to_company_cents",
     "reference_average_ticket_company_to_individual_cents",
@@ -48,7 +48,7 @@ PARAMETERS = {
     "two_factor_score_threshold",
     "rejection_score_threshold",
     "two_factor_validity_minutes",
-    "destination_alert_threshold",
+    "destination_risk_alert_threshold",
     "short_term_window_minutes",
 }
 EDITABLE_RULES = {
@@ -77,8 +77,8 @@ EDITABLE_RULES = {
 }
 BALANCED_PARAMETERS = {
     "history_window_days": 90,
-    "source_history_weight": 5,
-    "population_median_weight": 30,
+    "source_baseline_reference_weight": 5,
+    "population_median_reference_weight": 30,
     "reference_average_ticket_individual_to_individual_cents": 26864,
     "reference_average_ticket_individual_to_company_cents": 11242,
     "reference_average_ticket_company_to_individual_cents": 54958,
@@ -96,7 +96,7 @@ BALANCED_PARAMETERS = {
     "two_factor_score_threshold": 40,
     "rejection_score_threshold": 70,
     "two_factor_validity_minutes": 10,
-    "destination_alert_threshold": 30,
+    "destination_risk_alert_threshold": 30,
     "short_term_window_minutes": 1440,
 }
 
@@ -107,14 +107,14 @@ def restore_bank_policy():
     restore_balanced_bank_policy()
 
 
-def rule_setting(policy, code):
+def find_rule_setting(policy, rule_code):
     for setting in policy["rules"]:
-        if setting["code"] == code:
+        if setting["code"] == rule_code:
             return setting
-    raise AssertionError(f"A política não traz o ajuste da regra {code}")
+    raise AssertionError(f"A política não traz o ajuste da regra {rule_code}")
 
 
-def template(name):
+def find_template(name):
     status, body = RequestGenerator.GET_risk_policy_templates()
     assert status == 200
     for policy in body["templates"]:
@@ -134,38 +134,38 @@ class TestReadRiskPolicy:
         assert status == 200
         assert set(body) == POLICY_FIELDS
         assert body["name"] == "bank"
-        assert set(body["parameters"]) == PARAMETERS
+        assert set(body["parameters"]) == POLICY_PARAMETER_NAMES
         assert {setting["code"] for setting in body["rules"]} == EDITABLE_RULES
         assert all(set(setting) == RULE_SETTING_FIELDS for setting in body["rules"])
 
     def test_regulatory_rules_are_not_part_of_the_policy(self):
         policy = current_bank_policy()
 
-        codes = {setting["code"] for setting in policy["rules"]}
-        assert "nightly_limit_exceeded" not in codes
-        assert "unregistered_device_limit_exceeded" not in codes
+        rule_codes_in_policy = {setting["code"] for setting in policy["rules"]}
+        assert "nightly_limit_exceeded" not in rule_codes_in_policy
+        assert "unregistered_device_limit_exceeded" not in rule_codes_in_policy
 
     def test_templates_differ_in_thresholds_amount_multipliers_and_behavior_cap(self):
         multipliers = {
             name: (
-                rule_setting(template(name), "amount_above_baseline")["threshold"],
-                rule_setting(template(name), "amount_far_above_baseline")["threshold"],
+                find_rule_setting(find_template(name), "amount_above_baseline")["threshold"],
+                find_rule_setting(find_template(name), "amount_far_above_baseline")["threshold"],
             )
             for name in ("conservative", "balanced", "permissive")
         }
 
         assert multipliers == {"conservative": (3, 10), "balanced": (5, 20), "permissive": (10, 40)}
-        assert template("balanced")["parameters"] == BALANCED_PARAMETERS
-        assert template("conservative")["parameters"] == dict(
-            BALANCED_PARAMETERS, two_factor_score_threshold=35, rejection_score_threshold=60, destination_alert_threshold=25, behavior_score_cap=105
+        assert find_template("balanced")["parameters"] == BALANCED_PARAMETERS
+        assert find_template("conservative")["parameters"] == dict(
+            BALANCED_PARAMETERS, two_factor_score_threshold=35, rejection_score_threshold=60, destination_risk_alert_threshold=25, behavior_score_cap=105
         )
-        assert template("permissive")["parameters"] == dict(
+        assert find_template("permissive")["parameters"] == dict(
             BALANCED_PARAMETERS, two_factor_score_threshold=45, rejection_score_threshold=80, behavior_score_cap=75
         )
 
     def test_bank_policy_follows_the_balanced_template(self):
         policy = current_bank_policy()
-        balanced = template("balanced")
+        balanced = find_template("balanced")
 
         assert policy["parameters"] == balanced["parameters"]
         assert sorted(policy["rules"], key=lambda setting: setting["code"]) == sorted(balanced["rules"], key=lambda setting: setting["code"])
@@ -199,7 +199,7 @@ class TestEditRiskPolicy:
         assert body["based_on"] == {"name": "bank", "version": before["version"]}
         assert body["change_reason"] == "Baixa o limiar de 2FA"
         assert body["parameters"] == dict(before["parameters"], two_factor_score_threshold=35)
-        assert rule_setting(body, "burst_of_pix") == dict(rule_setting(before, "burst_of_pix"), points=30)
+        assert find_rule_setting(body, "burst_of_pix") == dict(find_rule_setting(before, "burst_of_pix"), points=30)
         assert current_bank_policy() == body
 
     def test_decimal_threshold_is_returned_as_saved(self, restore_bank_policy):
@@ -208,8 +208,8 @@ class TestEditRiskPolicy:
             "editar o multiplicador",
         )
 
-        assert rule_setting(created, "amount_above_baseline")["threshold"] == 4.5
-        assert rule_setting(current_bank_policy(), "amount_above_baseline")["threshold"] == 4.5
+        assert find_rule_setting(created, "amount_above_baseline")["threshold"] == 4.5
+        assert find_rule_setting(current_bank_policy(), "amount_above_baseline")["threshold"] == 4.5
 
     def test_old_version_stays_readable_and_unchanged(self, restore_bank_policy):
         before = current_bank_policy()
@@ -228,11 +228,11 @@ class TestEditRiskPolicy:
         assert status == 201
         assert body["based_on"] == {"name": "conservative", "version": 1}
         assert body["parameters"]["two_factor_score_threshold"] == 35
-        assert rule_setting(body, "amount_above_baseline")["threshold"] == 3
-        assert rule_setting(body, "amount_far_above_baseline")["threshold"] == 10
+        assert find_rule_setting(body, "amount_above_baseline")["threshold"] == 3
+        assert find_rule_setting(body, "amount_far_above_baseline")["threshold"] == 10
 
     def test_new_analyses_record_the_new_version(self, restore_bank_policy):
-        edited = edit_bank_policy({"change_reason": "Versão para conferir a análise", "parameters": {"destination_alert_threshold": 25}}, "editar a política")
+        edited = edit_bank_policy({"change_reason": "Versão para conferir a análise", "parameters": {"destination_risk_alert_threshold": 25}}, "editar a política")
 
         analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today()))
 
@@ -241,7 +241,7 @@ class TestEditRiskPolicy:
     def test_disabled_rule_stops_firing(self, restore_bank_policy):
         transaction_date = business_hours_today()
         edit_bank_policy(
-            {"change_reason": "Desliga a conta de destino muito recente", "rules": [{"code": "destination_account_opened_very_recently", "enabled": False}], **ACKNOWLEDGED},
+            {"change_reason": "Desliga a conta de destino muito recente", "rules": [{"code": "destination_account_opened_very_recently", "enabled": False}], **RISK_ACKNOWLEDGEMENT},
             "desligar a regra",
         )
 
@@ -258,7 +258,7 @@ class TestEditRiskPolicy:
 
         analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(opening_date=transaction_date - timedelta(days=3)), transaction_date))
 
-        assert rule_hit(analysis, "destination_account_opened_very_recently")["points"] == 35
+        assert fired_rule_hit(analysis, "destination_account_opened_very_recently")["points"] == 35
 
     def test_conservative_multiplier_flags_an_amount_the_balanced_accepts(self, restore_bank_policy):
         transaction_date = business_hours_today()
@@ -274,7 +274,7 @@ class TestEditRiskPolicy:
     def test_raised_amount_floor_silences_the_amount_rules(self, restore_bank_policy):
         transaction_date = business_hours_today()
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
-        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **ACKNOWLEDGED}, "subir o piso")
+        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **RISK_ACKNOWLEDGEMENT}, "subir o piso")
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
 
@@ -284,7 +284,7 @@ class TestEditRiskPolicy:
     def test_amount_floor_is_compared_with_the_accumulated_amount(self, restore_bank_policy):
         transaction_date = business_hours_today()
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
-        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **ACKNOWLEDGED}, "subir o piso")
+        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **RISK_ACKNOWLEDGEMENT}, "subir o piso")
         payee = new_individual_payee()
         analyze(pix_payload(payer, payee, transaction_date, 300000))
 
@@ -307,7 +307,7 @@ class TestEditRiskPolicy:
     def test_raised_amount_floor_also_silences_the_new_destination_ceiling(self, restore_bank_policy):
         transaction_date = business_hours_today()
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
-        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **ACKNOWLEDGED}, "subir o piso")
+        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **RISK_ACKNOWLEDGEMENT}, "subir o piso")
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
 
@@ -391,7 +391,7 @@ class TestEditRiskPolicy:
             {"change_reason": "Modelo desconhecido", "based_on_template": "aggressive"},
             {"change_reason": "Ajuste vazio", "rules": [{"code": "burst_of_pix"}]},
             {"change_reason": "Tipo errado", "parameters": {"two_factor_score_threshold": "40"}},
-            {"change_reason": "Aceite sem autor", "acknowledged_risk": True},
+            {"change_reason": "Aceite sem autor", "risk_acknowledged": True},
         ],
     )
     def test_invalid_body_is_refused_with_400_and_creates_no_version(self, invalid_body):
@@ -412,11 +412,11 @@ class TestEditRiskPolicy:
 
     def test_parallel_edits_never_create_the_same_version_twice(self, restore_bank_policy):
         edits = [
-            {"change_reason": f"Edição simultânea {position}", "parameters": {"destination_alert_threshold": 30 - position}}
+            {"change_reason": f"Edição simultânea {position}", "parameters": {"destination_risk_alert_threshold": 30 - position}}
             for position in range(5)
         ]
 
-        responses = fire_together([lambda edit=edit: RequestGenerator.POST_risk_policy_version(edit) for edit in edits])
+        responses = send_all_at_the_same_time([lambda edit=edit: RequestGenerator.POST_risk_policy_version(edit) for edit in edits])
 
         created_versions = [body["version"] for status, body in responses if status == 201]
         refused = [body for status, body in responses if status != 201]
@@ -426,11 +426,11 @@ class TestEditRiskPolicy:
         assert all(body["code"] == "QIT001017" for body in refused)
 
 
-def guardrail(guardrails, setting):
-    for row in guardrails["guardrails"]:
-        if row["setting"] == setting:
-            return row
-    raise AssertionError(f"A faixa de segurança de {setting} não existe")
+def find_guardrail(guardrails, setting_name):
+    for guardrail_row in guardrails["guardrails"]:
+        if guardrail_row["setting"] == setting_name:
+            return guardrail_row
+    raise AssertionError(f"A faixa de segurança de {setting_name} não existe")
 
 
 class TestRiskPolicyGuardrails:
@@ -439,12 +439,12 @@ class TestRiskPolicyGuardrails:
 
         assert status == 200
         assert body["reference"] == {"name": "balanced", "version": 1}
-        assert guardrail(body, "rejection_score_threshold") == {"setting": "rejection_score_threshold", "loosens_when": "higher", "recommended": 70, "refusal_limit": 80}
-        assert guardrail(body, "new_destination_above_usual_ceiling.points") == {
+        assert find_guardrail(body, "rejection_score_threshold") == {"setting": "rejection_score_threshold", "loosens_when": "higher", "recommended": 70, "loosest_accepted_value": 80}
+        assert find_guardrail(body, "new_destination_above_usual_ceiling.points") == {
             "setting": "new_destination_above_usual_ceiling.points",
             "loosens_when": "lower",
             "recommended": 30,
-            "refusal_limit": None,
+            "loosest_accepted_value": None,
         }
         assert {anchor_case["code"] for anchor_case in body["anchor_cases"]} == {
             "account_takeover_with_high_amount",
@@ -470,19 +470,19 @@ class TestRiskPolicyGuardrails:
 
     def test_acknowledged_loosening_is_recorded_with_who_asked(self, restore_bank_policy):
         status, body = RequestGenerator.POST_risk_policy_version(
-            {"change_reason": "Reprova mais tarde", "parameters": {"rejection_score_threshold": 75}, **ACKNOWLEDGED}
+            {"change_reason": "Reprova mais tarde", "parameters": {"rejection_score_threshold": 75}, **RISK_ACKNOWLEDGEMENT}
         )
 
         assert status == 201
         assert body["risk_acknowledged"] is True
-        assert body["requested_by"] == ACKNOWLEDGED["requested_by"]
+        assert body["requested_by"] == RISK_ACKNOWLEDGEMENT["requested_by"]
         assert current_bank_policy() == body
 
     def test_loosening_beyond_the_safety_limit_is_refused_even_when_acknowledged(self):
         version_before = current_bank_policy()["version"]
 
         status, body = RequestGenerator.POST_risk_policy_version(
-            {"change_reason": "Reprova só no extremo", "parameters": {"rejection_score_threshold": 85}, **ACKNOWLEDGED}
+            {"change_reason": "Reprova só no extremo", "parameters": {"rejection_score_threshold": 85}, **RISK_ACKNOWLEDGEMENT}
         )
 
         assert_error(status, body, 422, "QIT001018")
@@ -492,7 +492,7 @@ class TestRiskPolicyGuardrails:
         version_before = current_bank_policy()["version"]
 
         status, body = RequestGenerator.POST_risk_policy_version(
-            {"change_reason": "Desliga o aparelho compartilhado", "rules": [{"code": "device_used_by_many_sources", "enabled": False}], **ACKNOWLEDGED}
+            {"change_reason": "Desliga o aparelho compartilhado", "rules": [{"code": "device_used_by_many_sources", "enabled": False}], **RISK_ACKNOWLEDGEMENT}
         )
 
         assert_error(status, body, 422, "QIT001018")
@@ -502,7 +502,7 @@ class TestRiskPolicyGuardrails:
         version_before = current_bank_policy()["version"]
 
         status, body = RequestGenerator.POST_risk_policy_version(
-            {"change_reason": "Destino novo sem peso", "rules": [{"code": "new_destination_above_usual_ceiling", "points": 0}], **ACKNOWLEDGED}
+            {"change_reason": "Destino novo sem peso", "rules": [{"code": "new_destination_above_usual_ceiling", "points": 0}], **RISK_ACKNOWLEDGEMENT}
         )
 
         assert_error(status, body, 422, "QIT001019")
@@ -514,7 +514,7 @@ class TestRiskPolicyGuardrails:
         refused_status, refused_body = RequestGenerator.POST_risk_policy_version({"change_reason": "Passa ao permissivo", "based_on_template": "permissive"})
 
         accepted_status, accepted_body = RequestGenerator.POST_risk_policy_version(
-            {"change_reason": "Passa ao permissivo", "based_on_template": "permissive", **ACKNOWLEDGED}
+            {"change_reason": "Passa ao permissivo", "based_on_template": "permissive", **RISK_ACKNOWLEDGEMENT}
         )
 
         assert_error(refused_status, refused_body, 422, "QIT001020")

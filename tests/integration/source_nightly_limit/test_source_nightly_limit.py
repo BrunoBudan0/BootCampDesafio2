@@ -7,7 +7,7 @@ from tests.utils.clock import iso, parse_iso, today_at
 from tests.utils.random_generator import RandomGenerator
 from tests.utils.request_generator import RequestGenerator
 from tests.utils.requisition import ClientRequisition
-from tests.utils.scenario import setup_ok
+from tests.utils.scenario import assert_scenario_step_succeeded
 
 
 def nightly_limit(limit_cents, requested_at):
@@ -37,7 +37,7 @@ class TestSourceNightlyLimit:
         document_number = RandomGenerator.generate_cpf()
         first_request = today_at(9) - timedelta(days=3)
         status, body = RequestGenerator.POST_source_nightly_limit(document_number, nightly_limit(500000, first_request))
-        setup_ok(status, body, "aprovar o limite noturno de R$ 5.000", expected_statuses=(201,))
+        assert_scenario_step_succeeded(status, body, "aprovar o limite noturno de R$ 5.000", expected_statuses=(201,))
         second_request = first_request + timedelta(days=2)
 
         status, body = RequestGenerator.POST_source_nightly_limit(document_number, nightly_limit(300000, second_request))

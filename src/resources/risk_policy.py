@@ -11,8 +11,8 @@ class RiskPolicyResource:
 
         return JSONResponse(content=policy, status_code=status.HTTP_200_OK)
 
-    def on_get_version(self, version: str) -> JSONResponse:
-        policy = RiskPolicyController().get_bank_policy_version(version)
+    def on_get_version(self, version_number_text: str) -> JSONResponse:
+        policy = RiskPolicyController().get_bank_policy_version(version_number_text)
 
         return JSONResponse(content=policy, status_code=status.HTTP_200_OK)
 

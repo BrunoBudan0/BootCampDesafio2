@@ -32,8 +32,8 @@ from controllers.rules.catalog import (
 from controllers.rules.transaction_context import TransactionContext
 
 
-SEVERITY = {"approved": 0, "two_factor_required": 1, "rejected": 2}
-REDUCED_SCORE_PARTS = {
+DECISION_SEVERITY = {"approved": 0, "two_factor_required": 1, "rejected": 2}
+SCORE_PARTS_ABATED_BY_REDUCER = {
     LongRegisteredDevice.code: ("identity",),
     KnownDestination.code: ("relationship",),
     SameOwner.code: ("relationship", "amount"),
@@ -45,7 +45,7 @@ class AnalysisOutcome:
     decision: str
     rule_hits: list = field(default_factory=list)
     risk_score: Optional[int] = None
-    destination_risk: Optional[int] = None
+    destination_risk_score: Optional[int] = None
     two_factor_expires_at: Optional[datetime] = None
 
 
@@ -54,14 +54,14 @@ class ScoreParts:
     points: defaultdict = field(default_factory=lambda: defaultdict(int))
     reductions: defaultdict = field(default_factory=lambda: defaultdict(int))
 
-    def capped_and_reduced(self, part: str, cap: int) -> int:
-        return max(0, min(self.points[part], cap) + self.reductions[part])
+    def capped_and_reduced(self, score_part: str, score_part_cap: int) -> int:
+        return max(0, min(self.points[score_part], score_part_cap) + self.reductions[score_part])
 
-    def reduced(self, part: str) -> int:
-        return max(0, self.points[part] + self.reductions[part])
+    def reduced(self, score_part: str) -> int:
+        return max(0, self.points[score_part] + self.reductions[score_part])
 
 
-def evaluated_hits(rules: list, context: TransactionContext) -> list:
+def fired_rule_hits(rules: list, context: TransactionContext) -> list:
     return [rule_hit for rule_hit in (rule.evaluate(context) for rule in rules) if rule_hit is not None]
 
 
@@ -97,68 +97,68 @@ class AnalysisDecision:
         ]
 
     def decide(self, context: TransactionContext) -> AnalysisOutcome:
-        eliminatory_hits = evaluated_hits(self.eliminatory_rules, context)
+        eliminatory_hits = fired_rule_hits(self.eliminatory_rules, context)
 
         if eliminatory_hits:
             return AnalysisOutcome(decision="rejected", rule_hits=eliminatory_hits)
 
-        scoring_hits = evaluated_hits(self.scoring_and_reducer_rules, context)
-        regulatory_hits = evaluated_hits(self.regulatory_rules, context)
-        score_parts = self.score_parts(scoring_hits)
-        risk_score = self.risk_score(score_parts, context.policy)
-        decision = self.score_band(risk_score, context.policy)
+        scoring_hits = fired_rule_hits(self.scoring_and_reducer_rules, context)
+        regulatory_hits = fired_rule_hits(self.regulatory_rules, context)
+        score_parts = self.score_parts_of(scoring_hits)
+        risk_score = self.risk_score(score_parts, context.policy_version)
+        decision = self.decision_for_risk_score(risk_score, context.policy_version)
 
         for regulatory_hit in regulatory_hits:
             forced_decision = self.rules_by_code[regulatory_hit.code].forced_decision.enumerator
-            if SEVERITY[forced_decision] > SEVERITY[decision]:
+            if DECISION_SEVERITY[forced_decision] > DECISION_SEVERITY[decision]:
                 decision = forced_decision
 
         two_factor_expires_at = None
         if decision == "two_factor_required":
-            two_factor_expires_at = context.moment + timedelta(minutes=context.policy.two_factor_validity_minutes)
+            two_factor_expires_at = context.transaction_date + timedelta(minutes=context.policy_version.two_factor_validity_minutes)
 
         return AnalysisOutcome(
             decision=decision,
             rule_hits=regulatory_hits + scoring_hits,
             risk_score=risk_score,
-            destination_risk=self.destination_risk(score_parts),
+            destination_risk_score=self.destination_risk_score(score_parts),
             two_factor_expires_at=two_factor_expires_at,
         )
 
-    def score_parts(self, scoring_hits: list) -> ScoreParts:
-        parts = ScoreParts()
+    def score_parts_of(self, scoring_hits: list) -> ScoreParts:
+        score_parts = ScoreParts()
 
         for rule_hit in scoring_hits:
             rule = self.rules_by_code[rule_hit.code]
             if rule.kind == "reducer":
-                for part in REDUCED_SCORE_PARTS[rule.code]:
-                    parts.reductions[part] += rule_hit.points
+                for score_part in SCORE_PARTS_ABATED_BY_REDUCER[rule.code]:
+                    score_parts.reductions[score_part] += rule_hit.points
             else:
-                parts.points[rule.counterparty_signal or rule.family] += rule_hit.points
+                score_parts.points[rule.counterparty_signal or rule.family] += rule_hit.points
 
-        return parts
-
-    @staticmethod
-    def risk_score(parts: ScoreParts, policy) -> int:
-        identity = parts.capped_and_reduced("identity", policy.identity_family_cap)
-        velocity = parts.capped_and_reduced("velocity", policy.velocity_family_cap)
-        amount = parts.capped_and_reduced("amount", policy.amount_family_cap)
-        relationship = parts.capped_and_reduced("relationship", policy.counterparty_relationship_cap)
-        counterparty = min(relationship + parts.points["base"], policy.counterparty_family_cap)
-        base_evidence = counterparty - relationship
-        behavior = min(velocity + amount + relationship, policy.behavior_score_cap)
-        return identity + behavior + base_evidence
+        return score_parts
 
     @staticmethod
-    def score_band(risk_score: int, policy) -> str:
-        if risk_score >= policy.rejection_score_threshold:
+    def risk_score(score_parts: ScoreParts, policy_version) -> int:
+        identity_points = score_parts.capped_and_reduced("identity", policy_version.identity_family_cap)
+        velocity_points = score_parts.capped_and_reduced("velocity", policy_version.velocity_family_cap)
+        amount_points = score_parts.capped_and_reduced("amount", policy_version.amount_family_cap)
+        relationship_points = score_parts.capped_and_reduced("relationship", policy_version.counterparty_relationship_cap)
+        counterparty_points = min(relationship_points + score_parts.points["base"], policy_version.counterparty_family_cap)
+        base_evidence_points = counterparty_points - relationship_points
+        behavior_points = min(velocity_points + amount_points + relationship_points, policy_version.behavior_score_cap)
+        return identity_points + behavior_points + base_evidence_points
+
+    @staticmethod
+    def decision_for_risk_score(risk_score: int, policy_version) -> str:
+        if risk_score >= policy_version.rejection_score_threshold:
             return "rejected"
 
-        if risk_score >= policy.two_factor_score_threshold:
+        if risk_score >= policy_version.two_factor_score_threshold:
             return "two_factor_required"
 
         return "approved"
 
     @staticmethod
-    def destination_risk(parts: ScoreParts) -> int:
-        return parts.reduced("relationship") + parts.points["base"]
+    def destination_risk_score(score_parts: ScoreParts) -> int:
+        return score_parts.reduced("relationship") + score_parts.points["base"]

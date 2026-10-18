@@ -17,17 +17,17 @@ class SourceController(BaseController):
         if not is_valid_document_number(document_number):
             raise InvalidDocumentNumber("document")
 
-        source_document = normalized_document_number(document_number)
+        source_document_number = normalized_document_number(document_number)
 
-        if person_type_of(source_document) != "individual":
+        if person_type_of(source_document_number) != "individual":
             raise NightlyLimitOnlyForIndividuals()
 
         requested_at = required_datetime(payload["requested_at"], "requested_at")
-        self.advisory_lock_repository.lock_until_commit([source_lock_name(source_document)])
-        nightly_limits = self.source_repository.find_nightly_limits(source_document)
+        self.advisory_lock_repository.lock_until_commit([source_lock_name(source_document_number)])
+        nightly_limits = self.source_repository.find_nightly_limits(source_document_number)
 
         nightly_limit = SourceNightlyLimit(
-            source_document=source_document,
+            source_document_number=source_document_number,
             nightly_limit_cents=payload["nightly_limit_cents"],
             requested_at=requested_at,
             effective_at=nightly_limit_effective_at(nightly_limits, payload["nightly_limit_cents"], requested_at),

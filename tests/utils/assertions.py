@@ -8,20 +8,20 @@ def assert_error(status: int, body: dict, expected_status: int, expected_code: s
     assert body["code"] == expected_code, f"Esperava o código {expected_code} e veio {body['code']}"
 
 
-def rule_codes(analysis: dict) -> set:
-    return {rule_hit["code"] for rule_hit in analysis["metadata"]["rules"]}
+def fired_rule_codes(analysis: dict) -> set:
+    return {fired_rule["code"] for fired_rule in analysis["metadata"]["rules"]}
 
 
-def rule_hit(analysis: dict, code: str) -> dict:
-    for hit in analysis["metadata"]["rules"]:
-        if hit["code"] == code:
-            return hit
-    raise AssertionError(f"A regra {code} não disparou. Dispararam: {sorted(rule_codes(analysis))}")
+def fired_rule_hit(analysis: dict, code: str) -> dict:
+    for fired_rule in analysis["metadata"]["rules"]:
+        if fired_rule["code"] == code:
+            return fired_rule
+    raise AssertionError(f"A regra {code} não disparou. Dispararam: {sorted(fired_rule_codes(analysis))}")
 
 
 def assert_rule_fired(analysis: dict, code: str) -> None:
-    assert code in rule_codes(analysis), f"A regra {code} devia disparar. Dispararam: {sorted(rule_codes(analysis))}"
+    assert code in fired_rule_codes(analysis), f"A regra {code} devia disparar. Dispararam: {sorted(fired_rule_codes(analysis))}"
 
 
 def assert_rule_not_fired(analysis: dict, code: str) -> None:
-    assert code not in rule_codes(analysis), f"A regra {code} não devia disparar. Dispararam: {sorted(rule_codes(analysis))}"
+    assert code not in fired_rule_codes(analysis), f"A regra {code} não devia disparar. Dispararam: {sorted(fired_rule_codes(analysis))}"

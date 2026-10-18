@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from tests.utils.assertions import assert_rule_not_fired, rule_hit
+from tests.utils.assertions import assert_rule_not_fired, fired_rule_hit
 from tests.utils.clock import business_hours_today
 from tests.utils.pix_payload import new_individual_payee, new_individual_payer, payee_owned_by, pix_payload
 from tests.utils.scenario import analyze, analyze_expecting, payer_with_accepted_history
@@ -12,7 +12,7 @@ class TestSameOwner:
 
         analysis = analyze(pix_payload(payer, payee_owned_by(payer), business_hours_today()))
 
-        assert rule_hit(analysis, "same_owner")["points"] == -30
+        assert fired_rule_hit(analysis, "same_owner")["points"] == -30
 
     def test_pix_to_another_document_is_not_same_owner(self):
         analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today()))
@@ -27,7 +27,7 @@ class TestKnownDestination:
 
         analysis = analyze(pix_payload(payer, payee, transaction_date))
 
-        assert rule_hit(analysis, "known_destination")["points"] == -20
+        assert fired_rule_hit(analysis, "known_destination")["points"] == -20
 
     def test_destination_with_two_accepted_pix_is_not_known_yet(self):
         transaction_date = business_hours_today()
@@ -46,7 +46,7 @@ class TestLongRegisteredDevice:
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date))
 
-        assert rule_hit(analysis, "long_registered_device")["points"] == -10
+        assert fired_rule_hit(analysis, "long_registered_device")["points"] == -10
 
     def test_device_registered_29_days_ago_is_not_old_enough(self):
         transaction_date = business_hours_today()

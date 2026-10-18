@@ -183,7 +183,7 @@ O banco pode personalizar a política, mas a QI não assina embaixo de qualquer 
 | Situação | Resultado | Por quê |
 |----------|-----------|---------|
 | Edição mais rígida que a referência | Aceita | Mais fricção é escolha do banco, não risco de fraude |
-| Edição mais frouxa, dentro da faixa de segurança | Aceita só com `acknowledged_risk` e `requested_by`, gravados na versão | Fica registrado quem afrouxou, quando, por quê e que foi avisado |
+| Edição mais frouxa, dentro da faixa de segurança | Aceita só com `risk_acknowledged` e `requested_by`, gravados na versão | Fica registrado quem afrouxou, quando, por quê e que foi avisado |
 | Valor além da faixa de segurança | 422 QIT001018 | O modelo permissivo é, em linhas gerais, a fronteira do que a QI aceita |
 | Regra eliminatória desligada | 422 QIT001018 | Elas existem para fraudes em que o 2FA não protege |
 | Algum caso-âncora deixa de ser pego | 422 QIT001019 | Afrouxar um pouco cada ajuste não pode somar uma política que deixa passar invasão, laranja marcado ou falsa central |

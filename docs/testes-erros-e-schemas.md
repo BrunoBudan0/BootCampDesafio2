@@ -70,7 +70,7 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | `unregistered_device_limit_exceeded` | Aparelho não cadastrado e (valor do Pix `> R$ 200` ou soma do dia no mesmo aparelho `> R$ 1.000`). Vale também em início frio: o motor não recebe o cadastro de aparelhos do banco, então todo aparelho é tratado como novo até o motor cadastrá-lo |
 | `impossible_travel` | Velocidade `> 900 km/h` com o aparelho cadastrado |
 | `ip_unfamiliar`, `location_unfamiliar`, `channel_unfamiliar` | Fora do início frio, valor nunca usado nos Pix aceitos do pagador e pontos de familiaridade maiores que zero. O local só é avaliado se o Pix trouxer geolocalização. O canal é comparado em minúsculas |
-| `two_factor_denied_recently` | Alguma confirmação `denied` de análise do pagador com `confirmed_at` em `(T menos 24 h, T]` |
+| `two_factor_denied_recently` | Alguma confirmação `denied` de análise do pagador com `answered_at` em `(T menos 24 h, T]` |
 | `new_account_above_cap` | Conta nova e valor acumulado no total `>` teto de conta nova (PF R$ 1.000, PJ R$ 10.000) |
 | `burst_of_pix` | Tentativas do pagador em `(T menos 5 min, T]`, contando a atual, `>= 5` para PF e `>= 50` para PJ, que paga em lote |
 | `amount_above_baseline` | Fora do início frio, valor acumulado no recebedor `>=` piso das regras de valor e `>` multiplicador × base de comparação, sem `amount_far_above_baseline` |
@@ -95,7 +95,7 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 
 ### Decisão
 
-1. Regras eliminatórias. Se alguma dispara, só elas são gravadas, a decisão é `rejected`, e `risk_score` e `destination_risk` ficam nulos.
+1. Regras eliminatórias. Se alguma dispara, só elas são gravadas, a decisão é `rejected`, e `risk_score` e `destination_risk_score` ficam nulos.
 2. Pontuação de risco: identidade + comportamento + parte da base.
    - Cada família é limitada ao teto e perde os redutores que a desmentem, sem ficar abaixo de zero: `long_registered_device` abate a identidade, `known_destination` abate os sinais da relação, `same_owner` abate os sinais da relação e o valor.
    - Comportamento = min(velocidade + valor + relação, 65), com a relação limitada antes a 30.
@@ -120,26 +120,26 @@ Análise, regras disparadas e cadastro `first_seen` entram no mesmo COMMIT. Ante
     "status": "two_factor_required",
     "metadata": {
         "risk_score": 65,
-        "destination_risk": 25,
+        "destination_risk_score": 25,
         "policy": {"name": "bank", "version": 1},
         "rules": [
             {"code": "new_account_above_cap", "kind": "scoring", "family": "velocity", "points": 40, "reason": "Conta aberta há 10 dias pagando R$ 1.500,00, acima do teto de R$ 1.000,00"}
         ],
         "alerts": [],
-        "two_factor": {"status": "pending", "expires_at": "2026-10-17T14:10:00-03:00", "confirmed_at": null}
+        "two_factor": {"status": "pending", "expires_at": "2026-10-17T14:10:00-03:00", "answered_at": null}
     }
 }
 ```
 
 - `status` é sempre a decisão do motor e nunca muda.
 - O mesmo Pix é reconhecido pelo `payload_hash`: SHA-256 do JSON canônico (chaves em ordem) depois de normalizar documentos (só dígitos e letras), `channel` (minúsculas) e `amount` (inteiro). As datas entram como vieram: o mesmo instante com outro fuso é outro conteúdo (409), porque o fuso decide a noite.
-- `alerts` traz `{"code": "destination_alert", "destination_risk": 30, "threshold": 30}` quando o risco do recebedor atinge o limiar.
+- `alerts` traz `{"code": "destination_alert", "destination_risk_score": 30, "threshold": 30}` quando o risco do recebedor atinge o limiar.
 - `two_factor` é `null` quando a decisão não foi 2FA. O `status` dele é `confirmed` ou `denied` quando há confirmação. Sem confirmação, é `pending` ou `expired` pelo relógio do servidor (exceção consciente: é apresentação, não regra).
 - Nenhum documento, nem com nem sem pontuação, aparece na resposta, inclusive nos motivos.
 
 ### `POST /pix/transaction/{id}/two-factor`
 
-Devolve a análise inteira no mesmo formato acima, já com o resultado em `two_factor`. `201` na primeira confirmação. O mesmo resultado repetido dá `200` com a confirmação já gravada, mesmo que o `confirmed_at` enviado seja outro. Duas confirmações simultâneas com resultados diferentes gravam uma só: uma recebe `201` e a outra `409`.
+Devolve a análise inteira no mesmo formato acima, já com o resultado em `two_factor`. `201` na primeira confirmação. O mesmo resultado repetido dá `200` com a confirmação já gravada, mesmo que o `answered_at` enviado seja outro. Duas confirmações simultâneas com resultados diferentes gravam uma só: uma recebe `201` e a outra `409`.
 
 ### `POST /sources/{document}/nightly-limit`
 
@@ -164,7 +164,7 @@ Devolve a análise inteira no mesmo formato acima, já com o resultado em `two_f
 
 `parameters` traz os 22 parâmetros, e `rules` traz as 22 regras editáveis (as regulatórias ficam de fora). `GET /risk-policy/templates` devolve `{"templates": [...]}` com os três modelos nesse mesmo formato. A política também traz `requested_by` e `risk_acknowledged`.
 
-`GET /risk-policy/guardrails` devolve `{"reference": {"name": "balanced", "version": 1}, "guardrails": [...], "anchor_cases": [...]}`. Cada faixa tem `setting` (o parâmetro, ou `codigo_da_regra.ajuste`), `loosens_when` (`higher` ou `lower`), `recommended` (o valor da referência) e `refusal_limit` (nulo quando quem decide são os casos-âncora).
+`GET /risk-policy/guardrails` devolve `{"reference": {"name": "balanced", "version": 1}, "guardrails": [...], "anchor_cases": [...]}`. Cada faixa tem `setting` (o parâmetro, ou `codigo_da_regra.ajuste`), `loosens_when` (`higher` ou `lower`), `recommended` (o valor da referência) e `loosest_accepted_value` (nulo quando quem decide são os casos-âncora).
 
 O `POST` herda tudo da versão vigente da política do banco, ou do modelo pedido em `based_on_template`, e aplica por cima o que veio em `parameters` e `rules`.
 
@@ -187,7 +187,7 @@ Todo erro tem o corpo `{title, description, translation, code}`.
 | QIT001006 | 422 | Conta de origem ou de destino aberta depois da data do Pix | POST do Pix |
 | QIT001007 | 409 | Confirmação de 2FA para análise que não pediu 2FA | Confirmação de 2FA |
 | QIT001008 | 409 | Confirmação de 2FA com resultado diferente do já gravado | Confirmação de 2FA |
-| QIT001009 | 422 | `confirmed_at` antes do Pix ou depois de `two_factor_expires_at` | Confirmação de 2FA |
+| QIT001009 | 422 | `answered_at` antes do Pix ou depois de `two_factor_expires_at` | Confirmação de 2FA |
 | QIT001010 | 422 | Limite noturno pedido para CNPJ | Limite noturno |
 | QIT001011 | 404 | Versão de política inexistente | GET de versão |
 | QIT001012 | 422 | Código de regra desconhecido na edição | Edição da política |
@@ -198,7 +198,7 @@ Todo erro tem o corpo `{title, description, translation, code}`.
 | QIT001017 | 409 | Duas edições simultâneas tentaram criar a mesma versão | Edição da política |
 | QIT001018 | 422 | Valor além da faixa de segurança, ou regra eliminatória desligada | Edição da política |
 | QIT001019 | 422 | Algum caso-âncora deixaria de chegar à decisão mínima. A mensagem lista todos os que falham | Edição da política |
-| QIT001020 | 422 | A edição afrouxa a política em relação à referência sem `acknowledged_risk`. A mensagem lista o que afrouxou | Edição da política |
+| QIT001020 | 422 | A edição afrouxa a política em relação à referência sem `risk_acknowledged`. A mensagem lista o que afrouxou | Edição da política |
 
 **Por que 400 e 422 são diferentes:** 400 quer dizer "não consegui ler o pedido", e é o schema que decide. 422 quer dizer "li, entendi, e o valor não pode existir": um CPF com o formato certo e o dígito errado, ou uma data que passa no padrão e não existe no calendário. É a mesma separação do Base Service (`InvalidDocumentNumber` e `InvalidBirthdate`).
 
@@ -240,7 +240,7 @@ Peças usadas por mais de um schema, para cada regra de formato existir uma vez 
 | Campo | Regra | Por quê |
 |---|---|---|
 | `result` | `confirmed` ou `denied` | Palavras diferentes de `approved` e `rejected`, que são decisões do motor |
-| `confirmed_at` | `date_time_with_offset` | A data vem no corpo para a validade ser decidida sem relógio do servidor, o que deixa a regra determinística |
+| `answered_at` | `date_time_with_offset` | A data vem no corpo para a validade ser decidida sem relógio do servidor, o que deixa a regra determinística |
 
 ### `post_source_nightly_limit.json`
 
@@ -258,7 +258,7 @@ O documento vem no caminho e é validado no código: precisa ser um CPF válido 
 | `change_reason` | Obrigatório, até 255, com pelo menos um caractere que não seja espaço | Toda versão precisa dizer por que existe (auditoria e LGPD, art. 20) |
 | `based_on_template` | Opcional: `conservative`, `balanced` ou `permissive` | É assim que o banco troca de modelo de partida |
 | `requested_by` | Opcional, até 100, com pelo menos um caractere que não seja espaço | Quem pediu a edição no banco. Basta um identificador interno |
-| `acknowledged_risk` | Opcional, booleano. Exige `requested_by` (`dependencies`) | O aceite do risco só vale com alguém responsável por ele |
+| `risk_acknowledged` | Opcional, booleano. Exige `requested_by` (`dependencies`) | O aceite do risco só vale com alguém responsável por ele |
 | `parameters` | Opcional; só os 22 parâmetros conhecidos, cada um inteiro dentro de uma faixa | Parâmetro desconhecido é 400 porque não existe. As faixas barram valores sem sentido (janela de 0 dias). A coerência entre parâmetros fica no código (422) |
 | `rules` | Opcional; até 50 itens com `code` obrigatório e pelo menos um ajuste (`enabled`, `points` de -100 a 100, `threshold > 0`, `window_minutes >= 1`, `company_threshold > 0`) | Um item só com o código não ajusta nada. Qual ajuste cada regra aceita depende do catálogo e é conferido no código (422) |
 
@@ -266,7 +266,7 @@ Os valores regulatórios (R$ 1.000 da noite, R$ 200 e R$ 1.000 do aparelho) não
 
 ## 6. Banco de dados
 
-O `database/database.sql` cria as tabelas da modelagem, a VIEW `accepted_pix`, um gatilho comum (`refuse_change`) que recusa UPDATE, DELETE e TRUNCATE em todas as tabelas, e a carga inicial:
+O `database/database.sql` cria as tabelas da modelagem, a VIEW `accepted_pix`, um gatilho comum (`refuse_non_insert_change`) que recusa UPDATE, DELETE e TRUNCATE em todas as tabelas, e a carga inicial:
 - as 3 decisões;
 - as 24 regras do catálogo;
 - os 3 modelos e a política do banco;
@@ -288,7 +288,7 @@ O banco foi validado à parte, numa transação desfeita no fim, com 32 conferê
 - latitude sem longitude é recusada;
 - conta aberta depois do Pix é recusada;
 - canal com maiúscula é recusado no banco (o código normaliza antes);
-- `risk_score` e `destination_risk` só vêm juntos;
+- `risk_score` e `destination_risk_score` só vêm juntos;
 - o 2FA não pode expirar na própria data do Pix;
 - um Pix com CNPJ alfanumérico é aceito;
 - uma segunda confirmação de 2FA é recusada;

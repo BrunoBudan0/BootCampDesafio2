@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, rule_codes
+from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, fired_rule_codes
 from tests.utils.clock import business_hours_today
 from tests.utils.pix_payload import (
     MANAUS_LOCATION,
@@ -97,7 +97,7 @@ class TestImpossibleTravelOnUnregisteredDevice:
         )
 
         assert analysis["status"] == "rejected"
-        assert rule_codes(analysis) == {"impossible_travel_on_unregistered_device"}
+        assert fired_rule_codes(analysis) == {"impossible_travel_on_unregistered_device"}
 
     def test_travel_below_900_kmh_on_an_unregistered_device_is_not_impossible(self):
         transaction_date = business_hours_today()
@@ -127,7 +127,7 @@ class TestNewAccountToNewDestinationFarAboveCap:
         analysis = analyze(pix_payload(new_account_payer(transaction_date), new_individual_payee(), transaction_date, 500001))
 
         assert analysis["status"] == "rejected"
-        assert rule_codes(analysis) == {"new_account_to_new_destination_far_above_cap"}
+        assert fired_rule_codes(analysis) == {"new_account_to_new_destination_far_above_cap"}
 
     def test_exactly_five_times_the_cap_is_not_rejected_by_it(self):
         transaction_date = business_hours_today()

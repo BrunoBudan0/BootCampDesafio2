@@ -7,7 +7,7 @@ from tests.utils.pix_payload import new_individual_payee, new_individual_payer, 
 from tests.utils.random_generator import RandomGenerator
 from tests.utils.request_generator import RequestGenerator
 from tests.utils.requisition import ClientRequisition
-from tests.utils.scenario import analyze, two_factor_pix
+from tests.utils.scenario import analyze, new_account_pix_waiting_two_factor
 
 
 class TestPixTransactionGet:
@@ -42,15 +42,15 @@ class TestPixTransactionGet:
         status, body = RequestGenerator.GET_pix_transaction(payload["id"])
 
         assert status == 200
-        text = json.dumps(body)
+        serialized_body = json.dumps(body)
         for document_number in (payer.document_number, payee.document_number):
             digits = document_number.replace(".", "").replace("-", "").replace("/", "")
-            assert digits not in text
-            assert document_number not in text
+            assert digits not in serialized_body
+            assert document_number not in serialized_body
 
     def test_two_factor_inside_validity_is_shown_as_pending(self):
         transaction_date = now_in_sao_paulo() - timedelta(minutes=1)
-        _, _, payload, _ = two_factor_pix(transaction_date)
+        _, _, payload, _ = new_account_pix_waiting_two_factor(transaction_date)
 
         status, body = RequestGenerator.GET_pix_transaction(payload["id"])
 
@@ -58,10 +58,10 @@ class TestPixTransactionGet:
         two_factor = body["metadata"]["two_factor"]
         assert two_factor["status"] == "pending"
         assert parse_iso(two_factor["expires_at"]) == transaction_date + timedelta(minutes=10)
-        assert two_factor["confirmed_at"] is None
+        assert two_factor["answered_at"] is None
 
     def test_two_factor_after_validity_is_shown_as_expired(self):
-        _, _, payload, _ = two_factor_pix(now_in_sao_paulo() - timedelta(days=1))
+        _, _, payload, _ = new_account_pix_waiting_two_factor(now_in_sao_paulo() - timedelta(days=1))
 
         status, body = RequestGenerator.GET_pix_transaction(payload["id"])
 

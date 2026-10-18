@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, rule_hit
+from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, fired_rule_hit
 from tests.utils.clock import business_hours_today
 from tests.utils.pix_payload import new_individual_payee, new_individual_payer, pix_payload
 from tests.utils.scenario import analyze, payer_with_accepted_history
@@ -13,7 +13,7 @@ class TestAmountAboveBaseline:
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
 
-        assert rule_hit(analysis, "amount_above_baseline")["points"] == 25
+        assert fired_rule_hit(analysis, "amount_above_baseline")["points"] == 25
 
     def test_pix_above_twenty_times_the_baseline_adds_35_points_instead_of_25(self):
         transaction_date = business_hours_today()
@@ -21,7 +21,7 @@ class TestAmountAboveBaseline:
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 5000000))
 
-        assert rule_hit(analysis, "amount_far_above_baseline")["points"] == 35
+        assert fired_rule_hit(analysis, "amount_far_above_baseline")["points"] == 35
         assert_rule_not_fired(analysis, "amount_above_baseline")
 
     def test_reason_shows_the_multiplier_as_a_plain_number(self):
@@ -30,7 +30,7 @@ class TestAmountAboveBaseline:
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
 
-        assert "acima de 5 vezes a base" in rule_hit(analysis, "amount_above_baseline")["reason"]
+        assert "acima de 5 vezes a base" in fired_rule_hit(analysis, "amount_above_baseline")["reason"]
 
     def test_pix_below_five_times_the_baseline_is_within_the_pattern(self):
         transaction_date = business_hours_today()
@@ -69,7 +69,7 @@ class TestMonthlyVolumeAboveTypical:
 
         analysis = analyze(pix_payload(payer, payee, transaction_date, 40000))
 
-        assert rule_hit(analysis, "monthly_volume_above_typical")["points"] == 20
+        assert fired_rule_hit(analysis, "monthly_volume_above_typical")["points"] == 20
 
     def test_month_within_three_times_the_typical_month_does_not_add_points(self):
         transaction_date = business_hours_today()

@@ -14,7 +14,7 @@ class Rule(Base):
     counterparty_signal = Column(String(15))
     forced_decision_id = Column(Integer, ForeignKey("decision.id"))
     threshold_unit = Column(String(30))
-    uses_window = Column(Boolean, nullable=False)
+    uses_window_minutes = Column(Boolean, nullable=False)
     uses_company_threshold = Column(Boolean, nullable=False)
     description = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

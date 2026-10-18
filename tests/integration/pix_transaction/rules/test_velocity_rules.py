@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, rule_hit
+from tests.utils.assertions import assert_rule_fired, assert_rule_not_fired, fired_rule_hit
 from tests.utils.clock import business_hours_today, today_at
 from tests.utils.pix_payload import (
     new_company_payee,
@@ -9,7 +9,7 @@ from tests.utils.pix_payload import (
     new_individual_payer,
     pix_payload,
 )
-from tests.utils.scenario import analyze, analyze_expecting, confirm_two_factor, new_account_payer, two_factor_pix
+from tests.utils.scenario import analyze, analyze_expecting, answer_two_factor, new_account_payer, new_account_pix_waiting_two_factor
 
 
 class TestNewAccountAboveCap:
@@ -18,7 +18,7 @@ class TestNewAccountAboveCap:
 
         analysis = analyze(pix_payload(new_account_payer(transaction_date), new_company_payee(), transaction_date, 100001))
 
-        assert rule_hit(analysis, "new_account_above_cap")["points"] == 40
+        assert fired_rule_hit(analysis, "new_account_above_cap")["points"] == 40
 
     def test_individual_new_account_at_1000_reais_is_within_the_cap(self):
         transaction_date = business_hours_today()
@@ -64,7 +64,7 @@ class TestNewAccountAboveCap:
 
     def test_pending_two_factor_uses_the_cap(self):
         transaction_date = business_hours_today()
-        payer, _, _, _ = two_factor_pix(transaction_date)
+        payer, _, _, _ = new_account_pix_waiting_two_factor(transaction_date)
 
         analysis = analyze(pix_payload(payer, new_company_payee(), transaction_date + timedelta(minutes=1)))
 
@@ -72,8 +72,8 @@ class TestNewAccountAboveCap:
 
     def test_denied_two_factor_does_not_use_the_cap(self):
         transaction_date = business_hours_today()
-        payer, _, payload, _ = two_factor_pix(transaction_date)
-        confirm_two_factor(payload["id"], "denied", transaction_date + timedelta(seconds=30))
+        payer, _, payload, _ = new_account_pix_waiting_two_factor(transaction_date)
+        answer_two_factor(payload["id"], "denied", transaction_date + timedelta(seconds=30))
 
         analysis = analyze(pix_payload(payer, new_company_payee(), transaction_date + timedelta(minutes=1)))
 
@@ -81,7 +81,7 @@ class TestNewAccountAboveCap:
 
     def test_expired_two_factor_does_not_use_the_cap(self):
         transaction_date = business_hours_today()
-        payer, _, _, _ = two_factor_pix(transaction_date)
+        payer, _, _, _ = new_account_pix_waiting_two_factor(transaction_date)
 
         analysis = analyze(pix_payload(payer, new_company_payee(), transaction_date + timedelta(minutes=11)))
 
@@ -97,7 +97,7 @@ class TestBurstOfPix:
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), first_moment + timedelta(minutes=4, seconds=59)))
 
-        assert rule_hit(analysis, "burst_of_pix")["points"] == 25
+        assert fired_rule_hit(analysis, "burst_of_pix")["points"] == 25
 
     def test_company_paying_in_batch_within_five_minutes_is_not_a_burst(self):
         first_moment = business_hours_today()
