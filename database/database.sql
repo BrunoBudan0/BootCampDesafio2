@@ -70,25 +70,7 @@ CREATE TABLE risk_policy_version(
     requested_by                                                VARCHAR(100),
     risk_acknowledged                                           BOOLEAN NOT NULL DEFAULT false,
     created_at                                                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(risk_policy_id, version_number),
-    CONSTRAINT ck_risk_policy_version_positive_version_number CHECK (version_number > 0),
-    CONSTRAINT ck_risk_policy_version_change_reason CHECK (char_length(btrim(change_reason)) > 0),
-    CONSTRAINT ck_risk_policy_version_positive_windows CHECK (history_window_days > 0 AND short_term_window_minutes > 0 AND two_factor_validity_minutes > 0),
-    CONSTRAINT ck_risk_policy_version_positive_weights CHECK (source_baseline_reference_weight > 0 AND population_median_reference_weight > 0),
-    CONSTRAINT ck_risk_policy_version_positive_reference_tickets CHECK (
-        reference_average_ticket_individual_to_individual_cents > 0
-        AND reference_average_ticket_individual_to_company_cents > 0
-        AND reference_average_ticket_company_to_individual_cents > 0
-        AND reference_average_ticket_company_to_company_cents > 0
-    ),
-    CONSTRAINT ck_risk_policy_version_amount_rules_floor CHECK (amount_rules_floor_cents >= 0),
-    CONSTRAINT ck_risk_policy_version_new_account CHECK (new_account_age_days > 0 AND new_account_cap_individual_cents > 0 AND new_account_cap_company_cents > 0),
-    CONSTRAINT ck_risk_policy_version_positive_family_caps CHECK (identity_family_cap > 0 AND velocity_family_cap > 0 AND amount_family_cap > 0 AND counterparty_family_cap > 0),
-    CONSTRAINT ck_risk_policy_version_relationship_cap CHECK (counterparty_relationship_cap > 0 AND counterparty_relationship_cap <= counterparty_family_cap),
-    CONSTRAINT ck_risk_policy_version_behavior_score_cap CHECK (behavior_score_cap > 0),
-    CONSTRAINT ck_risk_policy_version_score_thresholds CHECK (two_factor_score_threshold > 0 AND rejection_score_threshold > two_factor_score_threshold),
-    CONSTRAINT ck_risk_policy_version_destination_risk_alert_threshold CHECK (destination_risk_alert_threshold > 0),
-    CONSTRAINT ck_risk_policy_version_acknowledged_by_someone CHECK (NOT risk_acknowledged OR requested_by IS NOT NULL)
+    UNIQUE(risk_policy_id, version_number)
 );
 
 CREATE TABLE risk_policy_guardrail(
@@ -117,11 +99,7 @@ CREATE TABLE risk_policy_rule_setting(
     window_minutes                  INTEGER,
     company_threshold               NUMERIC(12,2),
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(risk_policy_version_id, rule_id),
-    CONSTRAINT ck_risk_policy_rule_setting_points CHECK (points BETWEEN -100 AND 100),
-    CONSTRAINT ck_risk_policy_rule_setting_threshold CHECK (threshold > 0),
-    CONSTRAINT ck_risk_policy_rule_setting_window_minutes CHECK (window_minutes > 0),
-    CONSTRAINT ck_risk_policy_rule_setting_company_threshold CHECK (company_threshold > 0)
+    UNIQUE(risk_policy_version_id, rule_id)
 );
 
 CREATE TABLE pix_analysis(
@@ -155,27 +133,7 @@ CREATE TABLE pix_analysis(
     two_factor_expires_at               TIMESTAMPTZ,
     created_at                          TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(analysis_key),
-    UNIQUE(pix_id),
-    CONSTRAINT ck_pix_analysis_amount CHECK (amount_cents > 0),
-    CONSTRAINT ck_pix_analysis_utc_offset CHECK (transaction_utc_offset_minutes BETWEEN -720 AND 840),
-    CONSTRAINT ck_pix_analysis_source_document_number CHECK (source_document_number ~ '^([0-9]{11}|[0-9A-Z]{12}[0-9]{2})$'),
-    CONSTRAINT ck_pix_analysis_destination_document_number CHECK (destination_document_number ~ '^([0-9]{11}|[0-9A-Z]{12}[0-9]{2})$'),
-    CONSTRAINT ck_pix_analysis_source_person_type CHECK (source_person_type IN ('individual', 'company')),
-    CONSTRAINT ck_pix_analysis_destination_person_type CHECK (destination_person_type IN ('individual', 'company')),
-    CONSTRAINT ck_pix_analysis_source_person_type_matches_document_number CHECK ((source_person_type = 'individual') = (char_length(source_document_number) = 11)),
-    CONSTRAINT ck_pix_analysis_destination_person_type_matches_document_number CHECK ((destination_person_type = 'individual') = (char_length(destination_document_number) = 11)),
-    CONSTRAINT ck_pix_analysis_destination_participant_ispb CHECK (destination_participant_ispb ~ '^[0-9]{8}$'),
-    CONSTRAINT ck_pix_analysis_branches CHECK (source_branch ~ '^[0-9]{1,10}$' AND destination_branch ~ '^[0-9]{1,10}$'),
-    CONSTRAINT ck_pix_analysis_account_numbers CHECK (source_account_number ~ '^[0-9]{1,20}$' AND destination_account_number ~ '^[0-9]{1,20}$'),
-    CONSTRAINT ck_pix_analysis_opening_dates CHECK (source_account_opening_date <= transaction_date AND destination_account_opening_date <= transaction_date),
-    CONSTRAINT ck_pix_analysis_source_channel CHECK (source_channel ~ '^[a-z][a-z0-9_]{0,29}$'),
-    CONSTRAINT ck_pix_analysis_source_latitude CHECK (source_latitude BETWEEN -90 AND 90),
-    CONSTRAINT ck_pix_analysis_source_longitude CHECK (source_longitude BETWEEN -180 AND 180),
-    CONSTRAINT ck_pix_analysis_geolocation_complete CHECK ((source_latitude IS NULL) = (source_longitude IS NULL)),
-    CONSTRAINT ck_pix_analysis_risk_score CHECK (risk_score >= 0),
-    CONSTRAINT ck_pix_analysis_destination_risk_score CHECK (destination_risk_score >= 0),
-    CONSTRAINT ck_pix_analysis_scores_together CHECK ((risk_score IS NULL) = (destination_risk_score IS NULL)),
-    CONSTRAINT ck_pix_analysis_two_factor_expiration CHECK (two_factor_expires_at > transaction_date)
+    UNIQUE(pix_id)
 );
 
 CREATE INDEX ix_pix_analysis_source_document_number ON pix_analysis(source_document_number, transaction_date);
@@ -190,8 +148,7 @@ CREATE TABLE pix_analysis_rule_hit(
     points                          INTEGER NOT NULL,
     reason                          VARCHAR(255) NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(pix_analysis_id, rule_id),
-    CONSTRAINT ck_pix_analysis_rule_hit_reason CHECK (char_length(btrim(reason)) > 0)
+    UNIQUE(pix_analysis_id, rule_id)
 );
 
 CREATE INDEX ix_pix_analysis_rule_hit_rule ON pix_analysis_rule_hit(rule_id, pix_analysis_id);
@@ -202,8 +159,7 @@ CREATE TABLE two_factor_confirmation(
     result                          VARCHAR(10) NOT NULL,
     answered_at                     TIMESTAMPTZ NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(pix_analysis_id),
-    CONSTRAINT ck_two_factor_confirmation_result CHECK (result IN ('confirmed', 'denied'))
+    UNIQUE(pix_analysis_id)
 );
 
 CREATE TABLE registered_device(
@@ -214,8 +170,7 @@ CREATE TABLE registered_device(
     registered_at                   TIMESTAMPTZ NOT NULL,
     registration_pix_analysis_id    BIGINT NOT NULL REFERENCES pix_analysis(id),
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(source_document_number, device_id),
-    CONSTRAINT ck_registered_device_origin CHECK (registration_origin IN ('two_factor', 'first_seen'))
+    UNIQUE(source_document_number, device_id)
 );
 
 CREATE TABLE source_nightly_limit(
@@ -224,10 +179,7 @@ CREATE TABLE source_nightly_limit(
     nightly_limit_cents             BIGINT NOT NULL,
     requested_at                    TIMESTAMPTZ NOT NULL,
     effective_at                    TIMESTAMPTZ NOT NULL,
-    created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT ck_source_nightly_limit_individual_only CHECK (source_document_number ~ '^[0-9]{11}$'),
-    CONSTRAINT ck_source_nightly_limit_amount CHECK (nightly_limit_cents > 0),
-    CONSTRAINT ck_source_nightly_limit_effective_after_request CHECK (effective_at >= requested_at)
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX ix_source_nightly_limit_source_document_number ON source_nightly_limit(source_document_number, effective_at);

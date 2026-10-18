@@ -30,6 +30,7 @@ VIEW accepted_pix = pix_analysis aprovadas + pix_analysis com 2FA confirmado
 6. **Nenhum id do banco sai da API.** Para fora vão `analysis_key` (UUID), `pix_id`, nome da política e número da versão.
 7. **Dinheiro em centavos** (BIGINT).
 8. **Nada se burla fracionando.** Toda regra que compara um valor com um limite compara o maior entre o Pix analisado e o valor acumulado de curto prazo: o Pix analisado mais os Pix aceitos e 2FA pendentes do mesmo pagador dentro de `short_term_window_minutes`. Cada regra diz qual acumulado usa: o total do pagador ou só o que foi para o mesmo recebedor. Dois Pix de R$ 1.000 contam como R$ 2.000.
+9. **O banco guarda a estrutura; a aplicação valida os valores.** O banco garante o que só ele consegue garantir: chaves, NOT NULL, UNIQUE (que segura idempotência e concorrência), a política do banco única e o Só INSERT. CHECK de domínio fica só nas tabelas semeadas (`rule`, `risk_policy`, `risk_policy_guardrail`), que nenhuma rota escreve e que por isso só o banco pode conferir. Nas tabelas que a API escreve, cada valor é validado no schema JSON (400) ou no controller (422) antes do INSERT; a seção "Garantido pelo código, não pelo banco" diz onde fica cada regra.
 
 ## Tabelas
 
@@ -74,7 +75,7 @@ Catálogo de regras, semeado. Diz o que cada regra é e qual a forma dos seus aj
 
 ### risk_policy_version
 
-Os parâmetros da política, um por coluna, para cada um ter tipo e CHECK próprios.
+Os parâmetros da política, um por coluna, para cada um ter tipo e validação próprios no schema.
 
 | Coluna | Tipo | Restrição | Valor no modelo equilibrado |
 |---|---|---|---|
@@ -169,7 +170,7 @@ Tudo que chegou e a decisão do motor.
 | | `transaction_date` | TIMESTAMPTZ | NOT NULL |
 | | `transaction_utc_offset_minutes` | SMALLINT | Entre -720 e 840. O TIMESTAMPTZ guarda em UTC e perde o fuso; esta coluna preserva o horário local |
 | Origem | `source_document_number` | VARCHAR(14) | 11 dígitos ou 14 caracteres alfanuméricos maiúsculos |
-| | `source_person_type` | VARCHAR(10) | CHECK em `individual`, `company`, coerente com o tamanho do documento |
+| | `source_person_type` | VARCHAR(10) | `individual` ou `company`, coerente com o tamanho do documento |
 | | `source_branch` | VARCHAR(10) | |
 | | `source_account_number` | VARCHAR(20) | |
 | | `source_account_opening_date` | TIMESTAMPTZ | |
@@ -210,7 +211,7 @@ Tudo que chegou e a decisão do motor.
 |---|---|---|
 | `id` | BIGSERIAL | PK |
 | `pix_analysis_id` | BIGINT | FK `pix_analysis`. UNIQUE: uma confirmação por análise |
-| `result` | VARCHAR(10) | CHECK em `confirmed`, `denied` |
+| `result` | VARCHAR(10) | `confirmed` ou `denied` |
 | `answered_at` | TIMESTAMPTZ | NOT NULL. Quando o pagador respondeu ao 2FA, confirmando ou recusando. Vem no corpo do pedido |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
 
@@ -223,7 +224,7 @@ A rota confere que a análise pediu 2FA e que `answered_at` fica entre `transact
 | `id` | BIGSERIAL | PK |
 | `source_document_number` | VARCHAR(14) | UNIQUE com `device_id` |
 | `device_id` | VARCHAR(100) | |
-| `registration_origin` | VARCHAR(15) | CHECK em `two_factor`, `first_seen` |
+| `registration_origin` | VARCHAR(15) | `two_factor` ou `first_seen` |
 | `registered_at` | TIMESTAMPTZ | `answered_at` do 2FA ou `transaction_date` do primeiro Pix aceito |
 | `registration_pix_analysis_id` | BIGINT | FK `pix_analysis`: a análise que originou o cadastro |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
@@ -352,12 +353,34 @@ Regras de convivência:
 
 ## Garantido pelo código, não pelo banco
 
-- `two_factor_expires_at` preenchido se e somente se a decisão é `two_factor_required`.
-- `risk_policy_version_id` da análise aponta para uma versão da política `bank`, nunca de um modelo.
-- `registered_device.source_document_number` é o mesmo da análise de origem.
-- O ajuste de cada regra segue o catálogo: limite nulo quando `threshold_unit` é nulo, janela nula quando `uses_window_minutes` é falso, e toda versão tem as 22 linhas.
-- Fuso, números não finitos e limites com mais de 2 casas são recusados antes do INSERT, para nenhum CHECK virar 500.
-- `GET /risk-policy/templates` entra na entrega: os testes exigem.
+As regras abaixo valem para os dados gravados, mas não são CHECK no banco: quem garante é o schema JSON (antes de qualquer consulta, 400) ou o controller (422), e cada uma tem teste por HTTP.
+
+| Regra | Onde é garantida |
+|---|---|
+| Valor do Pix e limite noturno maiores que zero | Schema (`amount_cents`, mínimo 1) |
+| Fuso entre -12:00 e +14:00 | `parsed_datetime_with_offset` (422 QIT001004) |
+| Documento é CPF ou CNPJ válido, guardado sem pontuação e em maiúsculas | Schema e `required_document` (422 QIT001003) |
+| Tipo de pessoa coerente com o documento | `person_type_of`, que deriva um do outro |
+| ISPB com 8 dígitos, agência e conta só com dígitos | Schema |
+| Conta aberta até a data da transação | `pix_under_analysis_from` (422 QIT001006) |
+| Canal em minúsculas, letras, dígitos e `_` | Schema e normalização para minúsculas |
+| Latitude e longitude no intervalo, finitas e sempre juntas | Schema e `finite_coordinate` |
+| `risk_score` e `destination_risk_score` nunca negativos e sempre juntos | `AnalysisDecision`: cada parte é limitada a zero, e só a regra eliminatória deixa as duas nulas |
+| `two_factor_expires_at` preenchido se e somente se a decisão é `two_factor_required`, e depois da data da transação | `AnalysisDecision`, com `two_factor_validity_minutes` de no mínimo 1 no schema |
+| Motivo de regra disparada nunca em branco | Cada regra do catálogo monta o seu motivo |
+| Resultado do 2FA é `confirmed` ou `denied` | Schema |
+| Origem do cadastro do aparelho é `two_factor` ou `first_seen` | `PixAnalysisController`, que só grava esses dois |
+| Limite noturno só para CPF, e passa a valer no pedido ou depois | `SourceController` (422 QIT001010) e `nightly_limit_effective_at` |
+| Parâmetros da política positivos, piso maior ou igual a zero, motivo da mudança não vazio | Schema |
+| Limiar de reprovação acima do de 2FA; teto da relação até o teto da contraparte | `ensure_consistent_policy` (422 QIT001016) |
+| Aceite do risco só com quem pediu | Schema (`dependencies`) |
+| Número da versão sequencial a partir de 1 | `create_bank_policy_version`, com o UNIQUE da versão segurando edições simultâneas (409) |
+| Pontos de -100 a 100; limites e janelas maiores que zero | Schema; sinal dos pontos por tipo de regra em `ensure_consistent_policy` |
+| `risk_policy_version_id` da análise aponta para uma versão da política `bank` | `PixAnalysisController`, que só busca a versão vigente do banco |
+| `registered_device.source_document_number` é o mesmo da análise de origem | `PixAnalysisController` |
+| O ajuste de cada regra segue o catálogo: limite nulo quando `threshold_unit` é nulo, janela nula quando `uses_window_minutes` é falso, e toda versão tem as 22 linhas | `RiskPolicyController` |
+
+`GET /risk-policy/templates` entra na entrega: os testes exigem.
 
 ## Em aberto
 

@@ -272,32 +272,14 @@ O `database/database.sql` cria as tabelas da modelagem, a VIEW `accepted_pix`, u
 - os 3 modelos e a política do banco;
 - os 88 ajustes de regra (22 por versão).
 
-O banco foi validado à parte, numa transação desfeita no fim, com 32 conferências. Todas passaram:
-- a política do banco é cópia exata do modelo equilibrado;
-- os multiplicadores são 3, 5, 10 e 5;
-- as regulatórias não têm ajuste;
-- as decisões forçadas estão certas;
-- uma segunda política do banco é recusada;
-- UPDATE, DELETE e TRUNCATE são recusados;
-- versão repetida e limiar de reprovação abaixo do 2FA são recusados;
-- motivo em branco é recusado;
-- regra de pontuação sem família e eliminatória sem decisão forçada são recusadas;
-- `pix_id` repetido é recusado;
-- valor zero é recusado;
-- tipo de pessoa diferente do documento é recusado;
-- latitude sem longitude é recusada;
-- conta aberta depois do Pix é recusada;
-- canal com maiúscula é recusado no banco (o código normaliza antes);
-- `risk_score` e `destination_risk_score` só vêm juntos;
-- o 2FA não pode expirar na própria data do Pix;
-- um Pix com CNPJ alfanumérico é aceito;
-- uma segunda confirmação de 2FA é recusada;
-- resultado de 2FA desconhecido é recusado;
-- a VIEW aceita o 2FA confirmado;
-- o mesmo aparelho não é cadastrado duas vezes;
-- limite noturno para CNPJ e limite valendo antes do pedido são recusados.
+O banco guarda a estrutura e o histórico, e a validação dos valores fica no schema e no controller (veja "Garantido pelo código, não pelo banco" na modelagem). O que continua no banco:
+- chaves, FKs e NOT NULL;
+- UNIQUE de `pix_id`, `analysis_key`, versão por política, confirmação de 2FA por análise, aparelho por pagador e regra disparada por análise, que seguram idempotência e concorrência;
+- uma política do banco só (índice único parcial);
+- UPDATE, DELETE e TRUNCATE recusados pelo gatilho;
+- CHECK de domínio nas tabelas semeadas (`rule`, `risk_policy`, `risk_policy_guardrail`): regra de pontuação sem família, eliminatória sem decisão forçada e regulatória com ajuste são recusadas.
 
-Essas conferências não entram na suíte, porque a regra do projeto é testar só por HTTP.
+Essas garantias não entram na suíte, porque a regra do projeto é testar só por HTTP; as regras de valor são testadas pela API.
 
 ## 7. Os testes
 
