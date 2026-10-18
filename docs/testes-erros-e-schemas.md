@@ -55,8 +55,8 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | Local | Latitude e longitude arredondadas em 2 casas, com arredondamento do Postgres (metade para longe do zero) |
 | Distância | Fórmula de haversine com raio da Terra de 6.371 km, sobre as coordenadas como vieram |
 | Velocidade | Distância dividida pelo tempo entre o Pix analisado e a tentativa anterior mais recente do pagador que tinha geolocalização. Tempo zero com distância maior que zero conta como velocidade infinita |
-| Volume mensal típico | Soma dos Pix aceitos do pagador no período de referência vezes 30 dividida pelos dias do período. O período de referência é `[início, T menos 30 dias]`, fechado nas duas pontas, com início no mais tarde entre `T menos 90 dias` e o primeiro Pix aceito do pagador. Com menos de 30 dias de período, a regra não é avaliada |
-| Volume do mês atual | Valor do Pix mais o consumo de limite do pagador em `(T menos 30 dias, T]` |
+| Volume mensal típico | Soma dos Pix aceitos do pagador no período de referência vezes a janela da regra (30 dias) dividida pela duração do período. O período de referência é `[início, T menos a janela]`, fechado nas duas pontas, com início no mais tarde entre `T menos 90 dias` e o primeiro Pix aceito do pagador. Com período de referência menor que a janela, a regra não é avaliada. Se o banco mudar a janela, o volume típico é calculado para a mesma duração |
+| Volume do mês atual | Valor do Pix mais o consumo de limite do pagador em `(T menos a janela da regra, T]` |
 | Comparações de valor | Sempre em centavos e sempre estritas: "acima de R$ 1.000" é `> 100000` |
 
 ### Cada regra
@@ -74,7 +74,7 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | `new_account_above_cap` | Conta nova e valor acumulado no total `>` teto de conta nova (PF R$ 1.000, PJ R$ 10.000) |
 | `burst_of_pix` | Tentativas do pagador em `(T menos 5 min, T]`, contando a atual, `>= 5` |
 | `amount_above_baseline` | Fora do início frio, valor acumulado no recebedor `>=` piso das regras de valor e `>` multiplicador × base de comparação |
-| `monthly_volume_above_typical` | Fora do início frio, período de referência com 30 dias ou mais, volume do mês atual `>=` piso e `> 3 ×` volume mensal típico |
+| `monthly_volume_above_typical` | Fora do início frio, período de referência pelo menos do tamanho da janela da regra, volume do mês atual `>=` piso e `> 3 ×` volume mensal típico |
 | `destination_account_opened_very_recently` | Conta de destino com menos de 7 dias. Vale 25 pontos, abaixo do limiar de alerta: sozinha não gera alerta |
 | `destination_account_opened_recently` | Conta de destino com menos de 30 dias e sem a regra anterior |
 | `new_destination_above_usual_ceiling` | Documento do recebedor ausente dos Pix aceitos do pagador anteriores à janela de curto prazo (destino novo) e valor acumulado no recebedor `>` teto habitual. Pix aceitos nas últimas 24 h ainda não tornam o destino conhecido, para o fracionamento num destino novo não escapar |

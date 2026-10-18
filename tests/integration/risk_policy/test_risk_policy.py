@@ -274,6 +274,18 @@ class TestEditRiskPolicy:
 
         assert_rule_fired(analysis, "amount_above_baseline")
 
+    def test_shorter_monthly_volume_window_is_compared_with_a_typical_volume_of_the_same_length(self, restore_bank_policy):
+        transaction_date = business_hours_today()
+        payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=50), 2, spacing=timedelta(days=30))
+        edit_bank_policy(
+            {"change_reason": "Volume comparado em 15 dias", "rules": [{"code": "monthly_volume_above_typical", "window_minutes": 21600}]},
+            "encurtar a janela do volume",
+        )
+
+        analysis = analyze(pix_payload(payer, payee, transaction_date, 15000))
+
+        assert_rule_fired(analysis, "monthly_volume_above_typical")
+
     def test_company_threshold_is_the_limit_for_company_destinations(self, restore_bank_policy):
         transaction_date = business_hours_today()
         edit_bank_policy(

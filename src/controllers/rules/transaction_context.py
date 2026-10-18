@@ -17,7 +17,6 @@ NIGHT_STARTS_AT = time(20)
 NIGHT_ENDS_AT = time(6)
 DEFAULT_NIGHTLY_LIMIT_CENTS = 100000
 NIGHTLY_LIMIT_RAISE_DELAY = timedelta(hours=24)
-REFERENCE_MONTH_DAYS = 30
 
 
 def is_accepted(analysis: PixAnalysis) -> bool:

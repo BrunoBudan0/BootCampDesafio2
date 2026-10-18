@@ -246,29 +246,30 @@ class MonthlyVolumeAboveTypical(EditablePixRule):
         if context.is_cold_start:
             return None
 
-        current_month_start = context.window_start(setting.window_minutes)
+        current_period = timedelta(minutes=float(setting.window_minutes))
+        current_period_start = context.moment - current_period
         reference_start = min(analysis.transaction_date for analysis in context.accepted_history)
-        reference_days = (current_month_start - reference_start).total_seconds() / 86400
+        reference_period = current_period_start - reference_start
 
-        if reference_days < 30:
+        if reference_period < current_period:
             return None
 
         reference_total = sum(
             analysis.amount_cents
             for analysis in context.accepted_history
-            if reference_start <= analysis.transaction_date <= current_month_start
+            if reference_start <= analysis.transaction_date <= current_period_start
         )
-        typical_month = reference_total * 30 / reference_days
-        current_month = context.pix.amount_cents + context.limit_usage_since(current_month_start)
+        typical_period_volume = reference_total * (current_period / reference_period)
+        current_period_volume = context.pix.amount_cents + context.limit_usage_since(current_period_start)
 
-        if current_month < context.policy.amount_rules_floor_cents:
+        if current_period_volume < context.policy.amount_rules_floor_cents:
             return None
 
-        if current_month > float(setting.threshold) * typical_month:
+        if current_period_volume > float(setting.threshold) * typical_period_volume:
             return self.hit(
                 setting.points,
-                f"Volume do mês de {brazilian_reais(current_month)}, acima de {setting.threshold} vezes o mês típico de "
-                f"{brazilian_reais(typical_month)}",
+                f"Volume de {brazilian_reais(current_period_volume)} em {current_period.days} dias, acima de {setting.threshold} "
+                f"vezes o típico de {brazilian_reais(typical_period_volume)}",
             )
         return None
 
