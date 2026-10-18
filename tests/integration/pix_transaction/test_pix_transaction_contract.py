@@ -257,7 +257,7 @@ class TestPixTransactionContract:
     def test_account_opened_after_the_pix_is_refused_with_422_and_not_recorded(self, account):
         transaction_date = business_hours_today()
         payload = pix_payload(new_individual_payer(), new_individual_payee(), transaction_date)
-        payload[account]["opening_date"] = iso(transaction_date.replace(year=transaction_date.year + 1))
+        payload[account]["opening_date"] = iso(transaction_date + timedelta(days=1))
 
         status, body = RequestGenerator.POST_pix_transaction(payload)
 
