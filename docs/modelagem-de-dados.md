@@ -105,6 +105,8 @@ Os parâmetros da política, um por coluna, para cada um ter tipo e CHECK própr
 | `two_factor_validity_minutes` | INTEGER | > 0 | 10 |
 | `destination_alert_threshold` | INTEGER | > 0 | 30 |
 | `short_term_window_minutes` | INTEGER | > 0 | 1440 |
+| `requested_by` | VARCHAR(100) NULL | Quem pediu a edição no banco | |
+| `risk_acknowledged` | BOOLEAN | DEFAULT false. Verdadeiro só com `requested_by` preenchido | false |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() | |
 
 ### risk_policy_rule_setting
@@ -124,6 +126,34 @@ Ajuste de cada regra editável em cada versão. Toda versão tem a lista complet
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
 
 As regras regulatórias não têm linha aqui: os valores delas são de norma e ficam em constantes no código.
+
+### risk_policy_guardrail
+
+Faixa de segurança, semeada pela QI e fora do alcance do banco. Diz, para cada parâmetro e ajuste de regra, em que direção ele afrouxa a política e até onde o banco pode ir.
+
+| Coluna | Tipo | Restrição |
+|---|---|---|
+| `id` | SERIAL | PK |
+| `parameter_name` | VARCHAR(80) NULL | UNIQUE. Preenchida se e somente se `rule_id` é nula |
+| `rule_id` | INTEGER NULL | FK `rule`. UNIQUE com `setting_field` |
+| `setting_field` | VARCHAR(20) NULL | CHECK em `points`, `threshold`, `company_threshold`, `window_minutes`. Preenchida se e somente se `rule_id` está |
+| `loosening_direction` | VARCHAR(10) | CHECK em `higher`, `lower`: o lado que deixa passar mais Pix |
+| `refusal_limit` | NUMERIC(14,2) NULL | Além deste valor, a edição é recusada. Nula quando quem decide são os casos-âncora |
+| `created_at` | TIMESTAMPTZ | DEFAULT now() |
+
+Como a edição é julgada, sempre contra a política de referência (`balanced`, versão 1):
+1. Desligar uma regra eliminatória é recusado (422 QIT001018). Desligar uma regra de pontuação é afrouxar; desligar um redutor é ficar mais rígido.
+2. Valor além do `refusal_limit` é recusado (422 QIT001018). Os limites cobrem o que muda se uma regra dispara: piso, multiplicadores, contagens, idades de conta, tetos de conta nova e os três limiares de decisão.
+3. Pontos, tetos e limiares são julgados pelos casos-âncora: perfis de fraude conhecidos recalculados com a política proposta. Se algum deixa de chegar à decisão mínima, a edição é recusada (422 QIT001019).
+4. Qualquer valor mais frouxo que a referência, dentro dos limites, exige `acknowledged_risk` e `requested_by` (422 QIT001020 sem eles). Ficar mais rígido nunca exige.
+
+| Caso-âncora | Regras | Mínimo |
+|---|---|---|
+| Invasão de conta com valor alto | IP, local e canal nunca vistos (com 20 Pix de histórico), valor muito fora do padrão, destino novo acima do teto | `rejected` |
+| Laranja marcado pela base | destino novo acima do teto, fan-in, várias contas, reprovado para outros, aparelho cadastrado | `two_factor_required` com alerta |
+| Falsa central | valor muito fora do padrão, destino novo acima do teto, aparelho cadastrado | `two_factor_required` com alerta |
+
+As janelas das regras, os pesos de credibilidade, a validade do 2FA e os tickets de referência ficam sem faixa nesta versão.
 
 ### pix_analysis
 
@@ -286,7 +316,7 @@ Regras de convivência:
 |---|---|---|---|
 | `two_factor_score_threshold` | 35 | 40 | 45 |
 | `rejection_score_threshold` | 60 | 70 | 80 |
-| `destination_alert_threshold` | 25 | 30 | 35 |
+| `destination_alert_threshold` | 25 | 30 | 30 |
 | `behavior_score_cap` | 105 (sem limite na prática) | 65 | 75 |
 | `amount_above_baseline` | 3 × | 5 × | 10 × |
 | `amount_far_above_baseline` | 10 × | 20 × | 40 × |
@@ -317,7 +347,8 @@ Regras de convivência:
 | `POST /sources/{document}/nightly-limit` | 201. Corpo: `nightly_limit_cents` e `requested_at`. O banco chama depois de aprovar; o motor calcula `effective_at` |
 | `GET /risk-policy` | Versão vigente: parâmetros e ajustes de regra |
 | `GET /risk-policy/versions/{version}` | Uma versão antiga, para auditoria |
-| `POST /risk-policy/versions` | 201 versão nova. Corpo: `change_reason`, `based_on_template` opcional, parâmetros e ajustes que mudam. O resto é herdado. Edição simultânea cai no UNIQUE da versão: 409 |
+| `POST /risk-policy/versions` | 201 versão nova. Corpo: `change_reason`, `based_on_template` opcional, `requested_by` e `acknowledged_risk` opcionais, parâmetros e ajustes que mudam. O resto é herdado. Edição simultânea cai no UNIQUE da versão: 409. Faixas de segurança e casos-âncora: 422 |
+| `GET /risk-policy/guardrails` | A política de referência, as faixas de segurança com o valor recomendado e o limite de cada uma, e os casos-âncora |
 
 ## Garantido pelo código, não pelo banco
 

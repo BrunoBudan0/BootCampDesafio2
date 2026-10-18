@@ -16,6 +16,11 @@ class RiskPolicyResource:
 
         return JSONResponse(content=policy, status_code=status.HTTP_200_OK)
 
+    def on_get_guardrails(self) -> JSONResponse:
+        guardrails = RiskPolicyController().get_guardrails()
+
+        return JSONResponse(content=guardrails, status_code=status.HTTP_200_OK)
+
     def on_get_templates(self) -> JSONResponse:
         templates = RiskPolicyController().get_templates()
 

@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import relationship
 
 from models.base import Base
@@ -59,6 +59,8 @@ class RiskPolicyVersion(Base):
     two_factor_validity_minutes = Column(Integer, nullable=False)
     destination_alert_threshold = Column(Integer, nullable=False)
     short_term_window_minutes = Column(Integer, nullable=False)
+    requested_by = Column(String(100))
+    risk_acknowledged = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     risk_policy = relationship("RiskPolicy")

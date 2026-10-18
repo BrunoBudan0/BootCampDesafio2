@@ -169,12 +169,38 @@ Dois exemplos, com um pagador que faz Pix de R$ 100 há dois meses no mesmo celu
 |---------------------|--------------|----------|------------|
 | Limiar de 2FA | 35 | 40 | 45 |
 | Limiar de reprovação | 60 | 70 | 80 |
-| Limiar de alerta | 25 | 30 | 35 |
+| Limiar de alerta | 25 | 30 | 30 |
 | Teto do comportamento | sem limite | 65 | 75 |
 | Valor fora do padrão | 3 × base | 5 × base | 10 × base |
 | Valor muito fora do padrão | 10 × base | 20 × base | 40 × base |
 
 No conservador, comportamento atípico reprova sozinho: ele barra a falsa central sem evidência da base, e por isso também reprova o aluguel pago a um locador novo. No permissivo, o laranja marcado pela base pede 2FA em vez de reprovar. O banco troca de modelo com `based_on_template` e pode ajustar qualquer parâmetro por cima.
+
+### Personalização segura
+
+O banco pode personalizar a política, mas a QI não assina embaixo de qualquer configuração. Toda edição é julgada contra a política de referência (o modelo equilibrado), e nada disso roda na análise do Pix: só na edição da política.
+
+| Situação | Resultado | Por quê |
+|----------|-----------|---------|
+| Edição mais rígida que a referência | Aceita | Mais fricção é escolha do banco, não risco de fraude |
+| Edição mais frouxa, dentro da faixa de segurança | Aceita só com `acknowledged_risk` e `requested_by`, gravados na versão | Fica registrado quem afrouxou, quando, por quê e que foi avisado |
+| Valor além da faixa de segurança | 422 QIT001018 | O modelo permissivo é, em linhas gerais, a fronteira do que a QI aceita |
+| Regra eliminatória desligada | 422 QIT001018 | Elas existem para fraudes em que o 2FA não protege |
+| Algum caso-âncora deixa de ser pego | 422 QIT001019 | Afrouxar um pouco cada ajuste não pode somar uma política que deixa passar invasão, laranja marcado ou falsa central |
+
+As faixas e os casos-âncora ficam em `GET /risk-policy/guardrails`. Os valores de norma (limite noturno e Res. BCB 403) continuam fora de qualquer edição.
+
+### Evolução: monitoramento da política do banco
+
+O próximo passo, desenhado mas fora desta entrega, é medir quanto as decisões do banco se afastam da referência e a QI entrar em contato quando a diferença for grande:
+
+1. **Onde roda:** um job na própria instalação do banco, separado da API, de madrugada e lendo de uma réplica. O tempo de análise do Pix não muda.
+2. **O que faz:** reprocessa os Pix do período com a política de referência e compara com a decisão que o banco tomou. Isso é possível porque nenhuma regra lê o relógio, tudo é só INSERT e o payload inteiro fica gravado: o estado do banco no momento de cada Pix é reconstruído pela ordem de gravação.
+3. **O que mede:** Pix em que o banco foi mais frouxo que a referência (em quantidade e em valor somado), Pix em que foi mais rígido, e as regras que explicam a diferença.
+4. **Quando avisa:** contato imediato se algum Pix aprovado pelo banco seria reprovado por evidência da base; contato recomendado se a parcela de Pix mais frouxos passar de um limite; oportunidade de ajuda se o banco estiver muito mais rígido que a referência.
+5. **O que sai do banco:** só o resumo agregado, enviado pelo `connectors/rest_connector.py`. Nenhum CPF, CNPJ, conta, IP, localização, valor individual ou identificador de Pix vai para a QI; soma de valor só com pelo menos 5 Pix. A lista dos Pix divergentes fica no banco, e é lá que os dois olham quando conversam.
+
+Esse desenho segue o sigilo bancário (LC 105/2001) e a LGPD: o banco é o controlador, o reprocesso serve à mesma finalidade da coleta (prevenir fraude), e para a QI só vai informação agregada. Os dados de bancos diferentes nunca são cruzados.
 
 ### Limites conhecidos
 
@@ -197,7 +223,8 @@ No conservador, comportamento atípico reprova sozinho: ele barra a falsa centra
 | `GET /risk-policy` | Versão vigente da política do banco |
 | `GET /risk-policy/versions/{version}` | Uma versão anterior, para auditoria |
 | `GET /risk-policy/templates` | Os três modelos de política |
-| `POST /risk-policy/versions` | Cria uma versão nova da política: só o que vier no corpo muda, o resto é herdado |
+| `GET /risk-policy/guardrails` | A política de referência, as faixas de segurança e os casos-âncora |
+| `POST /risk-policy/versions` | Cria uma versão nova da política: só o que vier no corpo muda, o resto é herdado. Afrouxar exige o aceite do risco |
 
 Todo erro sai com código QIT e corpo `{title, description, translation, code}`. Os códigos estão em [docs/testes-erros-e-schemas.md](docs/testes-erros-e-schemas.md).
 
@@ -227,7 +254,7 @@ Rodar os testes, com a API de pé:
 pytest
 ```
 
-São 324 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
+São 333 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
 
 A API atende em `http://localhost:3000`. Toda rota, menos `/` e `/health_check`, exige o header `INTERNAL-TOKEN` (o padrão é `default_token`).
 

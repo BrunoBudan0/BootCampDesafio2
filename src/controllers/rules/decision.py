@@ -106,7 +106,7 @@ class AnalysisDecision:
         regulatory_hits = evaluated_hits(self.regulatory_rules, context)
         score_parts = self.score_parts(scoring_hits)
         risk_score = self.risk_score(score_parts, context.policy)
-        decision = self.score_band(risk_score, context)
+        decision = self.score_band(risk_score, context.policy)
 
         for regulatory_hit in regulatory_hits:
             forced_decision = self.rules_by_code[regulatory_hit.code].forced_decision.enumerator
@@ -150,11 +150,11 @@ class AnalysisDecision:
         return identity + behavior + base_evidence
 
     @staticmethod
-    def score_band(risk_score: int, context: TransactionContext) -> str:
-        if risk_score >= context.policy.rejection_score_threshold:
+    def score_band(risk_score: int, policy) -> str:
+        if risk_score >= policy.rejection_score_threshold:
             return "rejected"
 
-        if risk_score >= context.policy.two_factor_score_threshold:
+        if risk_score >= policy.two_factor_score_threshold:
             return "two_factor_required"
 
         return "approved"

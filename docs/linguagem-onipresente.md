@@ -165,3 +165,9 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Parâmetro da política | colunas de `risk_policy_version` | Número que vale para várias regras: janela de histórico, pesos, tetos, limiares, validade do 2FA | Ajuste de regra |
 | Motivo da mudança | `change_reason` | Por que a versão foi criada | Motivo |
 | Parâmetro regulatório | constantes no código | Valor que vem de norma. Fica fora da política | Parâmetro da política |
+| Política de referência | `balanced` | O modelo equilibrado, versão 1. É a régua da QI: define o que é recomendado e é contra ele que se mede o quanto o banco afrouxou | Política do banco |
+| Afrouxar | (direção de um ajuste) | Mudar um parâmetro ou ajuste para o lado que deixa passar mais Pix: subir um limiar ou um multiplicador, baixar pontos ou tetos, desligar uma regra de pontuação. Ficar mais rígido nunca é afrouxar | |
+| Faixa de segurança | `risk_policy_guardrail` | Para cada ajuste que muda se uma regra dispara (multiplicador, piso, contagem), o limite além do qual o banco não pode afrouxar | Caso-âncora |
+| Zona de atenção | (estado calculado) | Edição que afrouxa algum ajuste em relação à política de referência, sem passar da faixa de segurança. É aceita só com o aceite do risco | |
+| Aceite do risco | `risk_acknowledged`, `requested_by` | Confirmação gravada na versão de que o banco afrouxou a política sabendo do risco, com a identificação de quem pediu | Motivo da mudança |
+| Caso-âncora | `anchor_case` | Perfil de fraude conhecido (as regras que ele dispara) recalculado com a política proposta. Se a política deixar de dar a decisão mínima para ele, a edição é recusada | Faixa de segurança |

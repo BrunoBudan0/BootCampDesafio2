@@ -3,11 +3,22 @@
     "type": "object",
     "additionalProperties": false,
     "required": ["change_reason"],
+    "dependencies": {
+        "acknowledged_risk": ["requested_by"]
+    },
     "properties": {
         "change_reason": {
             "type": "string",
             "maxLength": 255,
             "pattern": "\\S"
+        },
+        "requested_by": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "\\S"
+        },
+        "acknowledged_risk": {
+            "type": "boolean"
         },
         "based_on_template": {
             "type": "string",

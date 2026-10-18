@@ -3,6 +3,7 @@ from models.rule import Rule
 from models.risk_policy import RiskPolicy
 from models.risk_policy_version import RiskPolicyVersion
 from models.risk_policy_rule_setting import RiskPolicyRuleSetting
+from models.risk_policy_guardrail import RiskPolicyGuardrail
 from models.two_factor_confirmation import TwoFactorConfirmation
 from models.pix_analysis_rule_hit import PixAnalysisRuleHit
 from models.pix_analysis import PixAnalysis

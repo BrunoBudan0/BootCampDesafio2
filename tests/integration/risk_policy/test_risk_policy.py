@@ -24,7 +24,8 @@ from tests.utils.scenario import (
 )
 
 
-POLICY_FIELDS = {"name", "version", "change_reason", "based_on", "parameters", "rules"}
+POLICY_FIELDS = {"name", "version", "change_reason", "requested_by", "risk_acknowledged", "based_on", "parameters", "rules"}
+ACKNOWLEDGED = {"requested_by": "analista.risco@banco.com.br", "acknowledged_risk": True}
 RULE_SETTING_FIELDS = {"code", "kind", "family", "enabled", "points", "threshold", "window_minutes", "company_threshold"}
 PARAMETERS = {
     "history_window_days",
@@ -159,7 +160,7 @@ class TestReadRiskPolicy:
             BALANCED_PARAMETERS, two_factor_score_threshold=35, rejection_score_threshold=60, destination_alert_threshold=25, behavior_score_cap=105
         )
         assert template("permissive")["parameters"] == dict(
-            BALANCED_PARAMETERS, two_factor_score_threshold=45, rejection_score_threshold=80, destination_alert_threshold=35, behavior_score_cap=75
+            BALANCED_PARAMETERS, two_factor_score_threshold=45, rejection_score_threshold=80, behavior_score_cap=75
         )
 
     def test_bank_policy_follows_the_balanced_template(self):
@@ -220,7 +221,7 @@ class TestEditRiskPolicy:
         assert old_version == before
 
     def test_version_based_on_a_template_copies_the_template(self, restore_bank_policy):
-        edit_bank_policy({"change_reason": "Ajusta antes de trocar de modelo", "parameters": {"two_factor_score_threshold": 50}}, "editar a política")
+        edit_bank_policy({"change_reason": "Ajusta antes de trocar de modelo", "parameters": {"two_factor_score_threshold": 38}}, "editar a política")
 
         status, body = RequestGenerator.POST_risk_policy_version({"change_reason": "Passa a seguir o modelo conservador", "based_on_template": "conservative"})
 
@@ -240,7 +241,7 @@ class TestEditRiskPolicy:
     def test_disabled_rule_stops_firing(self, restore_bank_policy):
         transaction_date = business_hours_today()
         edit_bank_policy(
-            {"change_reason": "Desliga a conta de destino muito recente", "rules": [{"code": "destination_account_opened_very_recently", "enabled": False}]},
+            {"change_reason": "Desliga a conta de destino muito recente", "rules": [{"code": "destination_account_opened_very_recently", "enabled": False}], **ACKNOWLEDGED},
             "desligar a regra",
         )
 
@@ -273,7 +274,7 @@ class TestEditRiskPolicy:
     def test_raised_amount_floor_silences_the_amount_rules(self, restore_bank_policy):
         transaction_date = business_hours_today()
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
-        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 10.000", "parameters": {"amount_rules_floor_cents": 1000000}}, "subir o piso")
+        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **ACKNOWLEDGED}, "subir o piso")
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
 
@@ -283,11 +284,11 @@ class TestEditRiskPolicy:
     def test_amount_floor_is_compared_with_the_accumulated_amount(self, restore_bank_policy):
         transaction_date = business_hours_today()
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
-        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 10.000", "parameters": {"amount_rules_floor_cents": 1000000}}, "subir o piso")
+        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **ACKNOWLEDGED}, "subir o piso")
         payee = new_individual_payee()
-        analyze(pix_payload(payer, payee, transaction_date, 600000))
+        analyze(pix_payload(payer, payee, transaction_date, 300000))
 
-        analysis = analyze(pix_payload(payer, payee, transaction_date + timedelta(minutes=1), 600000))
+        analysis = analyze(pix_payload(payer, payee, transaction_date + timedelta(minutes=1), 300000))
 
         assert_rule_fired(analysis, "amount_far_above_baseline")
 
@@ -306,7 +307,7 @@ class TestEditRiskPolicy:
     def test_raised_amount_floor_also_silences_the_new_destination_ceiling(self, restore_bank_policy):
         transaction_date = business_hours_today()
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
-        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 10.000", "parameters": {"amount_rules_floor_cents": 1000000}}, "subir o piso")
+        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 5.000", "parameters": {"amount_rules_floor_cents": 500000}, **ACKNOWLEDGED}, "subir o piso")
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
 
@@ -390,6 +391,7 @@ class TestEditRiskPolicy:
             {"change_reason": "Modelo desconhecido", "based_on_template": "aggressive"},
             {"change_reason": "Ajuste vazio", "rules": [{"code": "burst_of_pix"}]},
             {"change_reason": "Tipo errado", "parameters": {"two_factor_score_threshold": "40"}},
+            {"change_reason": "Aceite sem autor", "acknowledged_risk": True},
         ],
     )
     def test_invalid_body_is_refused_with_400_and_creates_no_version(self, invalid_body):
@@ -410,7 +412,7 @@ class TestEditRiskPolicy:
 
     def test_parallel_edits_never_create_the_same_version_twice(self, restore_bank_policy):
         edits = [
-            {"change_reason": f"Edição simultânea {position}", "parameters": {"destination_alert_threshold": 30 + position}}
+            {"change_reason": f"Edição simultânea {position}", "parameters": {"destination_alert_threshold": 30 - position}}
             for position in range(5)
         ]
 
@@ -422,3 +424,99 @@ class TestEditRiskPolicy:
         assert len(created_versions) == len(set(created_versions))
         assert all(status in (201, 409) for status, _ in responses)
         assert all(body["code"] == "QIT001017" for body in refused)
+
+
+def guardrail(guardrails, setting):
+    for row in guardrails["guardrails"]:
+        if row["setting"] == setting:
+            return row
+    raise AssertionError(f"A faixa de segurança de {setting} não existe")
+
+
+class TestRiskPolicyGuardrails:
+    def test_guardrails_show_the_reference_the_limits_and_the_anchor_cases(self):
+        status, body = RequestGenerator.GET_risk_policy_guardrails()
+
+        assert status == 200
+        assert body["reference"] == {"name": "balanced", "version": 1}
+        assert guardrail(body, "rejection_score_threshold") == {"setting": "rejection_score_threshold", "loosens_when": "higher", "recommended": 70, "refusal_limit": 80}
+        assert guardrail(body, "new_destination_above_usual_ceiling.points") == {
+            "setting": "new_destination_above_usual_ceiling.points",
+            "loosens_when": "lower",
+            "recommended": 30,
+            "refusal_limit": None,
+        }
+        assert {anchor_case["code"] for anchor_case in body["anchor_cases"]} == {
+            "account_takeover_with_high_amount",
+            "mule_flagged_by_the_base",
+            "false_call_center",
+        }
+
+    def test_stricter_edit_needs_no_acknowledgment(self, restore_bank_policy):
+        status, body = RequestGenerator.POST_risk_policy_version({"change_reason": "Reprova mais cedo", "parameters": {"rejection_score_threshold": 65}})
+
+        assert status == 201
+        assert body["risk_acknowledged"] is False
+        assert body["requested_by"] is None
+
+    def test_loosening_without_acknowledging_the_risk_is_refused_with_422_and_creates_no_version(self):
+        version_before = current_bank_policy()["version"]
+
+        status, body = RequestGenerator.POST_risk_policy_version({"change_reason": "Reprova mais tarde", "parameters": {"rejection_score_threshold": 75}})
+
+        assert_error(status, body, 422, "QIT001020")
+        assert "rejection_score_threshold" in body["description"]
+        assert_policy_unchanged(version_before)
+
+    def test_acknowledged_loosening_is_recorded_with_who_asked(self, restore_bank_policy):
+        status, body = RequestGenerator.POST_risk_policy_version(
+            {"change_reason": "Reprova mais tarde", "parameters": {"rejection_score_threshold": 75}, **ACKNOWLEDGED}
+        )
+
+        assert status == 201
+        assert body["risk_acknowledged"] is True
+        assert body["requested_by"] == ACKNOWLEDGED["requested_by"]
+        assert current_bank_policy() == body
+
+    def test_loosening_beyond_the_safety_limit_is_refused_even_when_acknowledged(self):
+        version_before = current_bank_policy()["version"]
+
+        status, body = RequestGenerator.POST_risk_policy_version(
+            {"change_reason": "Reprova só no extremo", "parameters": {"rejection_score_threshold": 85}, **ACKNOWLEDGED}
+        )
+
+        assert_error(status, body, 422, "QIT001018")
+        assert_policy_unchanged(version_before)
+
+    def test_eliminatory_rule_cannot_be_disabled_even_when_acknowledged(self):
+        version_before = current_bank_policy()["version"]
+
+        status, body = RequestGenerator.POST_risk_policy_version(
+            {"change_reason": "Desliga o aparelho compartilhado", "rules": [{"code": "device_used_by_many_sources", "enabled": False}], **ACKNOWLEDGED}
+        )
+
+        assert_error(status, body, 422, "QIT001018")
+        assert_policy_unchanged(version_before)
+
+    def test_edit_that_stops_catching_an_anchor_case_is_refused_even_when_acknowledged(self):
+        version_before = current_bank_policy()["version"]
+
+        status, body = RequestGenerator.POST_risk_policy_version(
+            {"change_reason": "Destino novo sem peso", "rules": [{"code": "new_destination_above_usual_ceiling", "points": 0}], **ACKNOWLEDGED}
+        )
+
+        assert_error(status, body, 422, "QIT001019")
+        assert "Falsa central" in body["translation"]
+        assert "Invasão de conta com valor alto" in body["translation"]
+        assert_policy_unchanged(version_before)
+
+    def test_switching_to_the_permissive_template_requires_acknowledging_the_risk(self, restore_bank_policy):
+        refused_status, refused_body = RequestGenerator.POST_risk_policy_version({"change_reason": "Passa ao permissivo", "based_on_template": "permissive"})
+
+        accepted_status, accepted_body = RequestGenerator.POST_risk_policy_version(
+            {"change_reason": "Passa ao permissivo", "based_on_template": "permissive", **ACKNOWLEDGED}
+        )
+
+        assert_error(refused_status, refused_body, 422, "QIT001020")
+        assert accepted_status == 201
+        assert accepted_body["based_on"] == {"name": "permissive", "version": 1}

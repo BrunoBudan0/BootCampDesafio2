@@ -179,6 +179,42 @@ class TwoFactorOutsideValidity(QIException):
         super().__init__(title, self.code, http_status, description, translation)
 
 
+class OutsideSafetyRange(QIException):
+    code = "QIT001018"
+
+    def __init__(self, description: str, translation: str) -> None:
+        title = "Outside Safety Range"
+        http_status = 422
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class AnchorCaseNoLongerCaught(QIException):
+    code = "QIT001019"
+
+    def __init__(self, missed_anchor_cases: list) -> None:
+        title = "Anchor Case No Longer Caught"
+        http_status = 422
+        cases = "; ".join(
+            f"{anchor_case.description} (mínimo {anchor_case.minimum_decision}{' com alerta' if anchor_case.requires_alert else ''})"
+            for anchor_case in missed_anchor_cases
+        )
+        description = f"With this policy, these anchor cases would no longer reach their minimum decision: {cases}."
+        translation = f"Com esta política, estes casos-âncora deixariam de chegar à decisão mínima: {cases}."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class RiskNotAcknowledged(QIException):
+    code = "QIT001020"
+
+    def __init__(self, loosened_settings: list) -> None:
+        title = "Risk Not Acknowledged"
+        http_status = 422
+        settings = ", ".join(loosened_settings)
+        description = f"This edit loosens the policy compared with the reference ({settings}). Send acknowledged_risk and requested_by to confirm it."
+        translation = f"Esta edição afrouxa a política em relação à referência ({settings}). Envie acknowledged_risk e requested_by para confirmar."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
 class NightlyLimitOnlyForIndividuals(QIException):
     code = "QIT001010"
 

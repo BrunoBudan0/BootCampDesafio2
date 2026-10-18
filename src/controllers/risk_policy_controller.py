@@ -5,21 +5,27 @@ from psycopg2.errors import UniqueViolation
 from sqlalchemy.exc import IntegrityError
 
 from controllers.base_controller import BaseController
-from dtos import risk_policy_response, risk_policy_templates_response
+from controllers.rules import ANCHOR_CASES, anchor_case_outcome
+from dtos import guardrails_response, risk_policy_response, risk_policy_templates_response
 from errors import (
+    AnchorCaseNoLongerCaught,
     ConcurrentRiskPolicyEdit,
     InconsistentRiskPolicy,
+    OutsideSafetyRange,
     RegulatoryRuleNotEditable,
     RepeatedRuleSetting,
+    RiskNotAcknowledged,
     RiskPolicyVersionNotFound,
     RuleSettingNotApplicable,
     UnknownRule,
 )
-from models import Rule, RiskPolicy, RiskPolicyRuleSetting, RiskPolicyVersion
-from repositories import RiskPolicyRepository, RuleRepository
+from models import Rule, RiskPolicy, RiskPolicyGuardrail, RiskPolicyRuleSetting, RiskPolicyVersion
+from repositories import RiskPolicyGuardrailRepository, RiskPolicyRepository, RuleRepository
+from utils.money import brazilian_decimal
 
 
 TEMPLATE_POLICY_KIND = "template"
+REFERENCE_POLICY_NAME = "balanced"
 VERSION_NUMBER_PATTERN = re.compile(r"[0-9]{1,9}")
 MINUTES_PER_DAY = 1440
 DECIMAL_SETTING_PLACES = Decimal("0.01")
@@ -32,6 +38,7 @@ class RiskPolicyController(BaseController):
         super().__init__(self.__class__.__name__)
         self.risk_policy_repository = RiskPolicyRepository(self.context)
         self.rule_repository = RuleRepository(self.context)
+        self.risk_policy_guardrail_repository = RiskPolicyGuardrailRepository(self.context)
 
     def get_current_bank_policy(self) -> dict:
         return risk_policy_response(self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME))
@@ -50,8 +57,14 @@ class RiskPolicyController(BaseController):
     def get_templates(self) -> dict:
         return risk_policy_templates_response(self.risk_policy_repository.find_current_versions_of_kind(TEMPLATE_POLICY_KIND))
 
+    def get_guardrails(self) -> dict:
+        reference_version = self.risk_policy_repository.find_current_version(REFERENCE_POLICY_NAME)
+        return guardrails_response(self.risk_policy_guardrail_repository.find_all(), reference_version, ANCHOR_CASES)
+
     def create_bank_policy_version(self, payload: dict) -> dict:
-        rule_edits = self.validated_rule_edits(payload.get("rules", []), self.rule_repository.find_all_by_code())
+        rules_by_code = self.rule_repository.find_all_by_code()
+        rule_edits = self.validated_rule_edits(payload.get("rules", []), rules_by_code)
+        risk_acknowledged = payload.get("acknowledged_risk", False)
         current_version = self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME)
         base_version = self.risk_policy_repository.find_current_version(payload.get("based_on_template", RiskPolicy.BANK_NAME))
 
@@ -60,6 +73,8 @@ class RiskPolicyController(BaseController):
             version=current_version.version + 1,
             based_on_version=base_version,
             change_reason=payload["change_reason"],
+            requested_by=payload.get("requested_by"),
+            risk_acknowledged=risk_acknowledged,
             **dict(base_version.parameters(), **payload.get("parameters", {})),
         )
         new_version.rule_settings = [
@@ -67,6 +82,7 @@ class RiskPolicyController(BaseController):
             for setting in base_version.rule_settings
         ]
         self.ensure_consistent_policy(new_version)
+        self.ensure_within_guardrails(new_version, rules_by_code, risk_acknowledged)
 
         try:
             self.risk_policy_repository.add_version(new_version)
@@ -79,6 +95,53 @@ class RiskPolicyController(BaseController):
             raise
 
         return response
+
+    def ensure_within_guardrails(self, version: RiskPolicyVersion, rules_by_code: dict, risk_acknowledged: bool) -> None:
+        reference_version = self.risk_policy_repository.find_current_version(REFERENCE_POLICY_NAME)
+        loosened_settings = self.switched_off_rules(version, reference_version)
+
+        for guardrail in self.risk_policy_guardrail_repository.find_all():
+            value = guardrail.value_in(version)
+
+            if loosens(guardrail, value, guardrail.refusal_limit):
+                raise OutsideSafetyRange(
+                    f"{guardrail.setting_name} = {brazilian_decimal(value)} is beyond the safety limit of {brazilian_decimal(guardrail.refusal_limit)}.",
+                    f"{guardrail.setting_name} = {brazilian_decimal(value)} passa do limite de segurança de {brazilian_decimal(guardrail.refusal_limit)}.",
+                )
+
+            if loosens(guardrail, value, guardrail.value_in(reference_version)):
+                loosened_settings.append(guardrail.setting_name)
+
+        missed_anchor_cases = [
+            anchor_case for anchor_case in ANCHOR_CASES if not anchor_case_outcome(anchor_case, version, rules_by_code).meets(anchor_case)
+        ]
+
+        if missed_anchor_cases:
+            raise AnchorCaseNoLongerCaught(missed_anchor_cases)
+
+        if loosened_settings and not risk_acknowledged:
+            raise RiskNotAcknowledged(loosened_settings)
+
+    @staticmethod
+    def switched_off_rules(version: RiskPolicyVersion, reference_version: RiskPolicyVersion) -> list:
+        enabled_in_reference = {setting.rule.code: setting.enabled for setting in reference_version.rule_settings}
+        switched_off = []
+
+        for setting in version.rule_settings:
+            code = setting.rule.code
+
+            if setting.enabled or not enabled_in_reference[code] or setting.rule.kind == "reducer":
+                continue
+
+            if setting.rule.kind == "eliminatory":
+                raise OutsideSafetyRange(
+                    f"The eliminatory rule {code} cannot be disabled.",
+                    f"A regra eliminatória {code} não pode ser desligada.",
+                )
+
+            switched_off.append(f"{code}.enabled")
+
+        return switched_off
 
     def validated_rule_edits(self, rule_edit_items: list, rules_by_code: dict) -> dict:
         rule_edits = {}
@@ -196,3 +259,13 @@ class RiskPolicyController(BaseController):
                 "The monthly volume window must be shorter than the history window.",
                 "A janela do volume mensal precisa ser menor que a janela de histórico.",
             )
+
+
+def loosens(guardrail: RiskPolicyGuardrail, value, compared_value) -> bool:
+    if value is None or compared_value is None:
+        return False
+
+    if guardrail.loosening_direction == "higher":
+        return value > compared_value
+
+    return value < compared_value

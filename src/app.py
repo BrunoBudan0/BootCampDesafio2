@@ -135,6 +135,7 @@ def create_app() -> FastAPI:
 
     application.add_api_route("/risk-policy", risk_policy_resource.on_get, methods=["GET"])
     application.add_api_route("/risk-policy/templates", risk_policy_resource.on_get_templates, methods=["GET"])
+    application.add_api_route("/risk-policy/guardrails", risk_policy_resource.on_get_guardrails, methods=["GET"])
     application.add_api_route("/risk-policy/versions", risk_policy_resource.on_post_version, methods=["POST"])
     application.add_api_route("/risk-policy/versions/{version}", risk_policy_resource.on_get_version, methods=["GET"])
 

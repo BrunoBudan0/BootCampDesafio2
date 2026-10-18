@@ -67,6 +67,8 @@ CREATE TABLE risk_policy_version(
     two_factor_validity_minutes                                 INTEGER NOT NULL,
     destination_alert_threshold                                 INTEGER NOT NULL,
     short_term_window_minutes                                   INTEGER NOT NULL,
+    requested_by                                                VARCHAR(100),
+    risk_acknowledged                                           BOOLEAN NOT NULL DEFAULT false,
     created_at                                                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(risk_policy_id, version),
     CONSTRAINT ck_risk_policy_version_positive_version CHECK (version > 0),
@@ -85,7 +87,24 @@ CREATE TABLE risk_policy_version(
     CONSTRAINT ck_risk_policy_version_relationship_cap CHECK (counterparty_relationship_cap > 0 AND counterparty_relationship_cap <= counterparty_family_cap),
     CONSTRAINT ck_risk_policy_version_behavior_score_cap CHECK (behavior_score_cap > 0),
     CONSTRAINT ck_risk_policy_version_score_thresholds CHECK (two_factor_score_threshold > 0 AND rejection_score_threshold > two_factor_score_threshold),
-    CONSTRAINT ck_risk_policy_version_destination_alert_threshold CHECK (destination_alert_threshold > 0)
+    CONSTRAINT ck_risk_policy_version_destination_alert_threshold CHECK (destination_alert_threshold > 0),
+    CONSTRAINT ck_risk_policy_version_acknowledged_by_someone CHECK (NOT risk_acknowledged OR requested_by IS NOT NULL)
+);
+
+CREATE TABLE risk_policy_guardrail(
+    id                              SERIAL PRIMARY KEY,
+    parameter_name                  VARCHAR(80),
+    rule_id                         INTEGER REFERENCES rule(id),
+    setting_field                   VARCHAR(20),
+    loosening_direction             VARCHAR(10) NOT NULL,
+    refusal_limit                   NUMERIC(14,2),
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(parameter_name),
+    UNIQUE(rule_id, setting_field),
+    CONSTRAINT ck_risk_policy_guardrail_target CHECK ((parameter_name IS NULL) <> (rule_id IS NULL)),
+    CONSTRAINT ck_risk_policy_guardrail_setting_field_with_rule CHECK ((rule_id IS NULL) = (setting_field IS NULL)),
+    CONSTRAINT ck_risk_policy_guardrail_setting_field CHECK (setting_field IN ('points', 'threshold', 'company_threshold', 'window_minutes')),
+    CONSTRAINT ck_risk_policy_guardrail_loosening_direction CHECK (loosening_direction IN ('higher', 'lower'))
 );
 
 CREATE TABLE risk_policy_rule_setting(
@@ -239,6 +258,7 @@ BEGIN
         'risk_policy',
         'risk_policy_version',
         'risk_policy_rule_setting',
+        'risk_policy_guardrail',
         'pix_analysis',
         'pix_analysis_rule_hit',
         'two_factor_confirmation',
@@ -356,7 +376,7 @@ SELECT
 FROM (VALUES
     ('conservative', 'Modelo conservador', 105, 35, 60, 25),
     ('balanced', 'Modelo equilibrado', 65, 40, 70, 30),
-    ('permissive', 'Modelo permissivo', 75, 45, 80, 35)
+    ('permissive', 'Modelo permissivo', 75, 45, 80, 30)
 ) AS template(name, change_reason, behavior_score_cap, two_factor_score_threshold, rejection_score_threshold, destination_alert_threshold)
 JOIN risk_policy ON risk_policy.name = template.name;
 
@@ -419,6 +439,55 @@ FROM risk_policy AS bank_policy
 JOIN risk_policy AS balanced_policy ON balanced_policy.name = 'balanced'
 JOIN risk_policy_version AS balanced_version ON balanced_version.risk_policy_id = balanced_policy.id AND balanced_version.version = 1
 WHERE bank_policy.name = 'bank';
+
+INSERT INTO risk_policy_guardrail (parameter_name, loosening_direction, refusal_limit) VALUES
+('two_factor_score_threshold', 'higher', 45),
+('rejection_score_threshold', 'higher', 80),
+('destination_alert_threshold', 'higher', 30),
+('amount_rules_floor_cents', 'higher', 500000),
+('new_account_age_days', 'lower', 15),
+('new_account_cap_individual_cents', 'higher', 200000),
+('new_account_cap_company_cents', 'higher', 2000000),
+('short_term_window_minutes', 'lower', 720),
+('identity_family_cap', 'lower', NULL),
+('velocity_family_cap', 'lower', NULL),
+('amount_family_cap', 'lower', NULL),
+('counterparty_family_cap', 'lower', NULL),
+('counterparty_relationship_cap', 'lower', NULL),
+('behavior_score_cap', 'lower', NULL);
+
+INSERT INTO risk_policy_guardrail (rule_id, setting_field, loosening_direction, refusal_limit)
+SELECT rule.id, 'points', 'lower', NULL
+FROM rule
+WHERE rule.kind IN ('scoring', 'reducer');
+
+INSERT INTO risk_policy_guardrail (rule_id, setting_field, loosening_direction, refusal_limit)
+SELECT rule.id, limit_row.setting_field, limit_row.loosening_direction, limit_row.refusal_limit
+FROM (VALUES
+    ('device_used_by_many_sources', 'threshold', 'higher', 8::NUMERIC),
+    ('impossible_travel_on_unregistered_device', 'threshold', 'higher', 1200),
+    ('new_account_to_new_destination_far_above_cap', 'threshold', 'higher', 10),
+    ('impossible_travel', 'threshold', 'higher', 1200),
+    ('ip_unfamiliar', 'threshold', 'higher', 10),
+    ('location_unfamiliar', 'threshold', 'higher', 10),
+    ('channel_unfamiliar', 'threshold', 'higher', 10),
+    ('burst_of_pix', 'threshold', 'higher', 10),
+    ('burst_of_pix', 'company_threshold', 'higher', 100),
+    ('amount_above_baseline', 'threshold', 'higher', 10),
+    ('amount_far_above_baseline', 'threshold', 'higher', 40),
+    ('monthly_volume_above_typical', 'threshold', 'higher', 6),
+    ('destination_account_opened_very_recently', 'threshold', 'lower', 3),
+    ('destination_account_opened_recently', 'threshold', 'lower', 15),
+    ('new_destination_above_usual_ceiling', 'threshold', 'higher', 2),
+    ('new_destination_above_usual_ceiling', 'company_threshold', 'higher', 5),
+    ('destination_receiving_from_many_sources', 'threshold', 'higher', 8),
+    ('destination_rejected_for_other_sources', 'threshold', 'higher', 3),
+    ('destination_document_in_many_accounts', 'threshold', 'higher', 5),
+    ('destination_document_in_many_accounts', 'company_threshold', 'higher', 15),
+    ('known_destination', 'threshold', 'lower', 2),
+    ('long_registered_device', 'threshold', 'lower', 15)
+) AS limit_row(rule_code, setting_field, loosening_direction, refusal_limit)
+JOIN rule ON rule.code = limit_row.rule_code;
 
 INSERT INTO risk_policy_rule_setting (risk_policy_version_id, rule_id, enabled, points, threshold, window_minutes, company_threshold)
 SELECT

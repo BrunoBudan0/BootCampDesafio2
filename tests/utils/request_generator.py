@@ -54,6 +54,11 @@ class RequestGenerator:
         return response.response_status, response.response_json
 
     @staticmethod
+    def GET_risk_policy_guardrails() -> tuple:
+        response = ClientRequisition.send("GET", "/risk-policy/guardrails", headers=AUTHORIZED_HEADERS)
+        return response.response_status, response.response_json
+
+    @staticmethod
     def POST_risk_policy_version(payload: dict) -> tuple:
         response = ClientRequisition.send("POST", "/risk-policy/versions", payload=payload, headers=AUTHORIZED_HEADERS)
         return response.response_status, response.response_json

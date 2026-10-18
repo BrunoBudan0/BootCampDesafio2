@@ -39,6 +39,8 @@ def risk_policy_response(version: RiskPolicyVersion) -> dict:
         "name": version.risk_policy.name,
         "version": version.version,
         "change_reason": version.change_reason,
+        "requested_by": version.requested_by,
+        "risk_acknowledged": version.risk_acknowledged,
         "based_on": policy_reference(version.based_on_version),
         "parameters": version.parameters(),
         "rules": [rule_setting_response(setting) for setting in version.rule_settings],
@@ -47,3 +49,35 @@ def risk_policy_response(version: RiskPolicyVersion) -> dict:
 
 def risk_policy_templates_response(template_versions: list) -> dict:
     return {"templates": [risk_policy_response(version) for version in template_versions]}
+
+
+def setting_value_response(value):
+    if isinstance(value, Decimal):
+        return decimal_to_json_number(value)
+
+    return value
+
+
+def guardrails_response(guardrails: list, reference_version: RiskPolicyVersion, anchor_cases: tuple) -> dict:
+    return {
+        "reference": policy_reference(reference_version),
+        "guardrails": [
+            {
+                "setting": guardrail.setting_name,
+                "loosens_when": guardrail.loosening_direction,
+                "recommended": setting_value_response(guardrail.value_in(reference_version)),
+                "refusal_limit": setting_value_response(guardrail.refusal_limit),
+            }
+            for guardrail in guardrails
+        ],
+        "anchor_cases": [
+            {
+                "code": anchor_case.code,
+                "description": anchor_case.description,
+                "rules": list(anchor_case.rule_codes),
+                "minimum_decision": anchor_case.minimum_decision,
+                "requires_alert": anchor_case.requires_alert,
+            }
+            for anchor_case in anchor_cases
+        ],
+    }
