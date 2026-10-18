@@ -1,0 +1,13 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["result", "confirmed_at"],
+    "properties": {
+        "result": {
+            "type": "string",
+            "enum": ["confirmed", "denied"]
+        },
+        "confirmed_at": {"$ref": "definitions.json#/definitions/date_time_with_offset"}
+    }
+}

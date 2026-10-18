@@ -1,0 +1,10 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["nightly_limit_cents", "requested_at"],
+    "properties": {
+        "nightly_limit_cents": {"$ref": "definitions.json#/definitions/amount_cents"},
+        "requested_at": {"$ref": "definitions.json#/definitions/date_time_with_offset"}
+    }
+}

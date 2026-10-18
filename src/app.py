@@ -9,7 +9,7 @@ from middlewares import (
     register_request_logger_middleware,
     register_session_manager_middleware,
 )
-from resources import HealthCheckResource
+from resources import HealthCheckResource, RiskPolicyResource
 from utils.logger import setup_logging
 
 
@@ -130,6 +130,13 @@ def create_app() -> FastAPI:
         health_check_resource.on_get_health_check,
         methods=["GET"]
     )
+
+    risk_policy_resource = RiskPolicyResource()
+
+    application.add_api_route("/risk-policy", risk_policy_resource.on_get, methods=["GET"])
+    application.add_api_route("/risk-policy/templates", risk_policy_resource.on_get_templates, methods=["GET"])
+    application.add_api_route("/risk-policy/versions", risk_policy_resource.on_post_version, methods=["POST"])
+    application.add_api_route("/risk-policy/versions/{version}", risk_policy_resource.on_get_version, methods=["GET"])
 
     register_error_handlers(application)
 

@@ -57,6 +57,7 @@ Catálogo de regras, semeado. Diz o que cada regra é e qual a forma dos seus aj
 | `forced_decision_id` | INTEGER NULL | FK `decision`. Preenchida se e somente se `kind` for `eliminatory` ou `regulatory` |
 | `threshold_unit` | VARCHAR(30) NULL | CHECK em `count`, `days`, `km_per_hour`, `multiplier`, `credibility_weight`. Nula quando a regra não tem limite |
 | `uses_window` | BOOLEAN | A regra tem janela própria em minutos |
+| `uses_company_threshold` | BOOLEAN | A regra tem limite próprio para recebedor PJ (`company_threshold`) |
 | `description` | VARCHAR(255) | Frase em português que vai para o README |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
 
