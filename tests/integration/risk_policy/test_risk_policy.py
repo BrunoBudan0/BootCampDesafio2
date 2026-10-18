@@ -155,7 +155,7 @@ class TestReadRiskPolicy:
         assert sorted(policy["rules"], key=lambda setting: setting["code"]) == sorted(balanced["rules"], key=lambda setting: setting["code"])
 
     def test_unknown_version_is_refused_with_404(self):
-        for unknown_version in ("999999", "zero", "-1"):
+        for unknown_version in ("999999", "zero", "-1", "²", "1" * 20):
             status, body = RequestGenerator.GET_risk_policy_version(unknown_version)
 
             assert_error(status, body, 404, "QIT001011")
@@ -299,6 +299,12 @@ class TestEditRiskPolicy:
             ({"change_reason": "Pontos em eliminatória", "rules": [{"code": "device_used_by_many_sources", "points": 10}]}, "QIT001014"),
             ({"change_reason": "Meio pagador", "rules": [{"code": "burst_of_pix", "threshold": 2.5}]}, "QIT001014"),
             ({"change_reason": "Mais de duas casas", "rules": [{"code": "amount_above_baseline", "threshold": 4.005}]}, "QIT001014"),
+            ({"change_reason": "Limite com três casas", "rules": [{"code": "amount_above_baseline", "threshold": 4.555}]}, "QIT001014"),
+            ({"change_reason": "Limite que viraria zero", "rules": [{"code": "amount_above_baseline", "threshold": 0.001}]}, "QIT001014"),
+            (
+                {"change_reason": "Limite de PJ com três casas", "rules": [{"code": "destination_document_in_many_accounts", "company_threshold": 10.005}]},
+                "QIT001014",
+            ),
             (
                 {"change_reason": "Regra repetida", "rules": [{"code": "burst_of_pix", "points": 20}, {"code": "burst_of_pix", "points": 30}]},
                 "QIT001015",

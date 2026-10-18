@@ -2,7 +2,7 @@
 
 Os termos seguem a [linguagem onipresente](linguagem-onipresente.md) e as tabelas seguem a [modelagem de dados](modelagem-de-dados.md). Este documento fecha o que os testes exigem: como cada regra é calculada, o formato de cada resposta, os códigos de erro e o porquê de cada schema.
 
-O projeto segue TDD: os testes foram escritos antes do código, viram vermelhos com HTTP 404 e ficaram verdes quando as rotas entraram. Hoje a suíte tem 298 testes e todos passam, de forma estável, inclusive com o banco recriado do zero.
+O projeto segue TDD: os testes foram escritos antes do código, viram vermelhos com HTTP 404 e ficaram verdes quando as rotas entraram. Hoje a suíte tem 301 testes e todos passam, de forma estável, inclusive com o banco recriado do zero.
 
 ## 1. Como rodar
 
@@ -317,5 +317,5 @@ Essas conferências não entram na suíte, porque a regra do projeto é testar s
 | `rules/test_reducer_rules.py` | 6 | Mesma titularidade; destino conhecido a partir de 3 Pix; aparelho cadastrado há mais de 30 dias |
 | `two_factor/test_two_factor_confirmation.py` | 21 | Confirmação e recusa gravadas; repetição, inclusive com outro momento; resultados opostos em paralelo gravam um só; resultado trocado dá 409; análise sem 2FA dá 409; 404; fora da validade dá 422; último segundo aceito; corpo inválido; token; 2FA confirmado entra no histórico e cadastra o aparelho, recusado não |
 | `source_nightly_limit/test_source_nightly_limit.py` | 15 | Aumento vale em 24 h, redução na hora, comparação com o limite em vigor; documento sem pontuação; CNPJ e CPF inválido dão 422; corpo inválido; data inexistente; token |
-| `risk_policy/test_risk_policy.py` | 39 | Formato da política; regulatórias fora; modelos diferem só no multiplicador; política do banco segue o equilibrado; versão inexistente; token; edição herda o resto; versão antiga não muda; troca de modelo; análise grava a versão nova; regra desligada para; pontos editados; multiplicador conservador; piso das regras de valor contra o acumulado; limite de PJ; cada edição incoerente dá 422 sem criar versão, inclusive limite fracionado e com 3 casas; corpo inválido dá 400; edições simultâneas nunca repetem versão |
+| `risk_policy/test_risk_policy.py` | 42 | Formato da política; regulatórias fora; modelos diferem só no multiplicador; política do banco segue o equilibrado; versão inexistente; token; edição herda o resto; versão antiga não muda; troca de modelo; análise grava a versão nova; regra desligada para; pontos editados; multiplicador conservador; piso das regras de valor contra o acumulado; limite de PJ; cada edição incoerente dá 422 sem criar versão, inclusive limite fracionado e com 3 casas; corpo inválido dá 400; edições simultâneas nunca repetem versão |
 | `test_healthcheck.py` | 6 | Os testes do template, sem mudança |

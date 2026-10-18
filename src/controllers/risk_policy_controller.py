@@ -1,3 +1,4 @@
+import re
 from decimal import ROUND_HALF_UP, Decimal
 
 from psycopg2.errors import UniqueViolation
@@ -20,7 +21,7 @@ from repositories import RiskPolicyRepository, RuleRepository
 
 BANK_POLICY_NAME = "bank"
 TEMPLATE_POLICY_KIND = "template"
-LARGEST_VERSION_DIGITS = 9
+VERSION_NUMBER_PATTERN = re.compile(r"[0-9]{1,9}")
 MINUTES_PER_DAY = 1440
 DECIMAL_SETTING_PLACES = Decimal("0.01")
 DECIMAL_SETTING_FIELDS = ("threshold", "company_threshold")
@@ -37,7 +38,7 @@ class RiskPolicyController(BaseController):
         return risk_policy_response(self.risk_policy_repository.find_current_version(BANK_POLICY_NAME))
 
     def get_bank_policy_version(self, version: str) -> dict:
-        if not version.isdigit() or len(version) > LARGEST_VERSION_DIGITS:
+        if VERSION_NUMBER_PATTERN.fullmatch(version) is None:
             raise RiskPolicyVersionNotFound()
 
         policy_version = self.risk_policy_repository.find_version(BANK_POLICY_NAME, int(version))
