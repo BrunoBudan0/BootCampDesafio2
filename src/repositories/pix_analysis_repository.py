@@ -70,11 +70,12 @@ class PixAnalysisRepository:
         ).one()
         return count, median
 
-    def count_other_sources_on_device(self, device_id: str, source_document: str, since: datetime, until: datetime) -> int:
+    def count_other_individual_sources_on_device(self, device_id: str, source_document: str, since: datetime, until: datetime) -> int:
         return self.session.scalar(
             select(func.count(distinct(PixAnalysis.source_document))).where(
                 PixAnalysis.device_id == device_id,
                 PixAnalysis.source_document != source_document,
+                PixAnalysis.source_person_type == "individual",
                 PixAnalysis.transaction_date > since,
                 PixAnalysis.transaction_date <= until,
             )

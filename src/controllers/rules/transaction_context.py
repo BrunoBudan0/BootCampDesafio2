@@ -12,6 +12,7 @@ from models import PixAnalysis, RiskPolicyVersion
 
 
 EARTH_RADIUS_KM = 6371
+IMPOSSIBLE_TRAVEL_MINIMUM_DISTANCE_KM = 50
 LOCATION_PLACES = Decimal("0.01")
 NIGHT_STARTS_AT = time(20)
 NIGHT_ENDS_AT = time(6)
@@ -25,6 +26,10 @@ def is_accepted(analysis: PixAnalysis) -> bool:
     return decision == "approved" or (
         decision == "two_factor_required" and confirmation is not None and confirmation.result == "confirmed"
     )
+
+
+def is_same_owner(pix) -> bool:
+    return pix.source_document == pix.destination_document
 
 
 def is_pending_two_factor_at(analysis: PixAnalysis, moment: datetime) -> bool:
@@ -162,6 +167,7 @@ class TransactionContext:
             for analysis in self.accepted_history
             if analysis.source_person_type == self.pix.source_person_type
             and analysis.destination_person_type == self.pix.destination_person_type
+            and not is_same_owner(analysis)
         ]
 
     @cached_property
@@ -195,10 +201,12 @@ class TransactionContext:
 
     @cached_property
     def usual_ceiling_amount(self) -> Decimal:
-        if self.is_cold_start:
-            return self.baseline_amount
-
-        return Decimal(max(analysis.amount_cents for analysis in self.accepted_history))
+        amounts_to_other_owners = [
+            Decimal(analysis.amount_cents)
+            for analysis in self.accepted_history_before_short_term
+            if not is_same_owner(analysis)
+        ]
+        return max([self.baseline_amount, *amounts_to_other_owners])
 
     @cached_property
     def accepted_history_before_short_term(self) -> list:
@@ -249,18 +257,22 @@ class TransactionContext:
         return self.pix_analysis_repository.source_has_any_accepted_pix(self.pix.source_document)
 
     @cached_property
-    def previous_located_analysis(self) -> Optional[PixAnalysis]:
-        located = [analysis for analysis in self.source_analyses if analysis.latitude is not None]
+    def last_located_accepted_pix(self) -> Optional[PixAnalysis]:
+        located = [analysis for analysis in self.accepted_history if analysis.latitude is not None]
         return located[-1] if located else None
 
     @cached_property
     def travel_speed_kmh(self) -> Optional[float]:
-        previous = self.previous_located_analysis
+        previous = self.last_located_accepted_pix
 
         if previous is None or not self.pix.has_geolocation:
             return None
 
         distance = distance_km(previous.latitude, previous.longitude, self.pix.latitude, self.pix.longitude)
+
+        if distance < IMPOSSIBLE_TRAVEL_MINIMUM_DISTANCE_KM:
+            return None
+
         hours = (self.moment - previous.transaction_date).total_seconds() / 3600
 
         if hours <= 0:

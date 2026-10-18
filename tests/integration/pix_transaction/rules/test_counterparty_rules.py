@@ -6,6 +6,7 @@ from tests.utils.pix_payload import (
     new_company_payee,
     new_individual_payee,
     new_individual_payer,
+    payee_owned_by,
     pix_payload,
     same_payee_in_another_account,
 )
@@ -122,6 +123,39 @@ class TestNewDestinationAboveUsualCeiling:
 
         assert_rule_not_fired(first_part, "new_destination_above_usual_ceiling")
         assert_rule_fired(second_part, "new_destination_above_usual_ceiling")
+
+    def test_small_accepted_pix_do_not_lower_the_ceiling_below_the_baseline(self):
+        transaction_date = business_hours_today()
+        payer = new_individual_payer()
+        analyze_expecting(pix_payload(payer, new_company_payee(), transaction_date - timedelta(days=2), 1000), "approved", "pagar R$ 10 numa loja")
+
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 10000))
+
+        assert_rule_not_fired(analysis, "new_destination_above_usual_ceiling")
+
+    def test_pix_to_own_account_do_not_raise_the_usual_ceiling(self):
+        transaction_date = business_hours_today()
+        payer, _ = self.history_with_ceiling_of_300_reais(transaction_date)
+        analyze_expecting(
+            pix_payload(payer, payee_owned_by(payer), transaction_date - timedelta(days=1, hours=1), 3000000),
+            "approved",
+            "mover R$ 30.000 para conta própria",
+        )
+
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 2000000))
+
+        assert_rule_fired(analysis, "new_destination_above_usual_ceiling")
+
+    def test_pix_accepted_in_the_last_24_hours_do_not_raise_the_usual_ceiling(self):
+        transaction_date = business_hours_today()
+        payer, _ = self.history_with_ceiling_of_300_reais(transaction_date)
+        large_pix = pix_payload(payer, new_individual_payee(), transaction_date - timedelta(hours=1), 500000)
+        analyze_expecting(large_pix, "two_factor_required", "Pix grande para destino novo")
+        confirm_two_factor(large_pix["id"], "confirmed", transaction_date - timedelta(minutes=59))
+
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 400000))
+
+        assert_rule_fired(analysis, "new_destination_above_usual_ceiling")
 
     def test_payer_without_accepted_pix_is_compared_with_the_population_baseline(self):
         analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today(), 100000000))

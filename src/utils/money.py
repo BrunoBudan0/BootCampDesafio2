@@ -6,3 +6,7 @@ def brazilian_reais(amount_cents) -> str:
     whole, cents = f"{reais:.2f}".split(".")
     whole_with_thousands = f"{int(whole):,}".replace(",", ".")
     return f"R$ {whole_with_thousands},{cents}"
+
+
+def brazilian_decimal(value) -> str:
+    return f"{Decimal(value).normalize():f}".replace(".", ",")

@@ -5,6 +5,8 @@ from tests.utils.clock import business_hours_today
 from tests.utils.pix_payload import (
     MANAUS_LOCATION,
     SAO_PAULO_LOCATION,
+    new_company_payee,
+    new_company_payer,
     new_individual_payee,
     new_individual_payer,
     payer_on_another_device,
@@ -58,6 +60,19 @@ class TestDeviceUsedByManySources:
         payers_using_the_same_device(device_id, transaction_date - timedelta(hours=24), 4)
 
         analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), transaction_date, device_id=device_id))
+
+        assert_rule_not_fired(analysis, "device_used_by_many_sources")
+
+    def test_companies_sharing_one_computer_are_not_a_device_farm(self):
+        transaction_date = business_hours_today()
+        device_id = RandomGenerator.generate_device_id()
+        for position in range(4):
+            analyze(
+                pix_payload(new_company_payer(), new_company_payee(), transaction_date - timedelta(minutes=5 + position), device_id=device_id),
+                f"pagar por outra empresa no mesmo computador ({position + 1} de 4)",
+            )
+
+        analysis = analyze(pix_payload(new_company_payer(), new_company_payee(), transaction_date, device_id=device_id))
 
         assert_rule_not_fired(analysis, "device_used_by_many_sources")
 

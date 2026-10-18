@@ -99,6 +99,16 @@ class TestBurstOfPix:
 
         assert rule_hit(analysis, "burst_of_pix")["points"] == 25
 
+    def test_company_paying_in_batch_within_five_minutes_is_not_a_burst(self):
+        first_moment = business_hours_today()
+        company = new_company_payer()
+        for minute in range(4):
+            analyze(pix_payload(company, new_individual_payee(), first_moment + timedelta(minutes=minute)))
+
+        analysis = analyze(pix_payload(company, new_individual_payee(), first_moment + timedelta(minutes=4, seconds=59)))
+
+        assert_rule_not_fired(analysis, "burst_of_pix")
+
     def test_pix_from_five_minutes_ago_or_more_do_not_count(self):
         first_moment = business_hours_today()
         payer = new_individual_payer()

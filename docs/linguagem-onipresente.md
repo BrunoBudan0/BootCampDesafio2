@@ -110,7 +110,7 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Valor fora do padrão | `amount_above_baseline` | Pix acima do multiplicador vezes a base de comparação | |
 | Piso das regras de valor | `amount_rules_floor_cents` | Abaixo dele, as regras da família valor não pontuam (R$ 100) | |
 | Teto de conta nova | `new_account_cap_*` | Maior Pix que uma conta nova faz sem fricção (PF R$ 1.000, PJ R$ 10.000) | Limite regulatório |
-| Teto habitual | `usual_ceiling_amount` | Maior Pix aceito do pagador na janela de histórico. Em início frio, é a base de comparação | Teto de conta nova |
+| Teto habitual | `usual_ceiling_amount` | O maior entre a base de comparação e o maior Pix aceito do pagador na janela de histórico, sem contar Pix para conta própria nem os aceitos na janela de curto prazo | Teto de conta nova |
 | Familiaridade | `familiarity` | Se aquele IP, local ou canal já apareceu nos Pix aceitos do pagador. Só o que nunca apareceu pontua, e pesa mais quanto maior o histórico do pagador | Dispositivo cadastrado |
 | Local | `location` | Latitude e longitude arredondadas em 2 casas (cerca de 1 km) | |
 
@@ -125,7 +125,7 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Fan-in | `destination_receiving_from_many_sources` | Recebedor PF que recebe Pix a partir do piso das regras de valor de muitos pagadores diferentes em pouco tempo | |
 | Recebedor com reprovações | `destination_rejected_for_other_sources` | Recebedor com 2FA recusados, ou com Pix reprovados em que disparou alguma regra de contraparte, vindos de outros pagadores em pouco tempo. Só soma risco e ignora as análises em que ela mesma disparou | |
 | Recebedor em várias contas | `destination_document_in_many_accounts` | Mesmo documento de recebedor recebendo em várias contas de destino diferentes em pouco tempo. Recebedor PJ tem um limite próprio, bem maior | |
-| Limite de PJ | `company_threshold` | Limite próprio de uma regra quando o recebedor é PJ. O banco aumenta criando uma versão nova da política | |
+| Limite de PJ | `company_threshold` | Limite próprio de uma regra para pessoa jurídica: o recebedor PJ em `destination_document_in_many_accounts` e o pagador PJ em `burst_of_pix`. O banco muda criando uma versão nova da política | |
 | Alcance do sinal | `rule.counterparty_signal`: `relationship`, `base` | Diz se uma regra de contraparte depende só deste pagador ou de todos os pagadores da instalação | Família |
 | Sinal da relação | `relationship` | Regra de contraparte que depende do que este pagador sabe do recebedor: idade da conta de destino e destino novo acima do teto habitual. Os redutores abatem | Sinal da base |
 | Sinal da base | `base` | Regra de contraparte que depende do que todos os pagadores da instalação viram do recebedor: fan-in, recebedor com reprovações e recebedor em várias contas. Os redutores não abatem, porque o que um pagador sabe do recebedor não apaga o que a base inteira viu | Sinal da relação |
@@ -142,9 +142,9 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Dispositivo cadastrado | `registered_device` | Aparelho que o motor já reconheceu para aquele pagador | Familiaridade |
 | Origem do cadastro | `registration_origin`: `two_factor`, `first_seen` | 2FA confirmado naquele aparelho, ou primeiro Pix aceito do pagador | |
 | Dispositivo não cadastrado | (estado calculado) | Aparelho sem cadastro para aquele pagador. Sujeito aos limites da Res. BCB 403: R$ 200 por Pix e R$ 1.000 por dia | |
-| Dispositivo compartilhado | `device_used_by_many_sources` | Mesmo aparelho usado por muitos pagadores diferentes em pouco tempo | |
+| Dispositivo compartilhado | `device_used_by_many_sources` | Mesmo aparelho usado por muitos pagadores PF diferentes em pouco tempo. Empresas que pagam pelo mesmo computador, como um escritório de contabilidade, não contam | |
 | Canal | `channel` | Por onde o Pix foi iniciado: `app`, `web` e outros que aparecerem. Texto aberto | Dispositivo |
-| Viagem impossível | `impossible_travel` | Dois Pix seguidos do pagador em locais que exigiriam mais de 900 km/h | |
+| Viagem impossível | `impossible_travel` | Pix a mais de 50 km do último Pix aceito do pagador com geolocalização, num deslocamento que exigiria mais de 900 km/h | |
 | Rajada | `burst_of_pix` | Muitos Pix do mesmo pagador em poucos minutos | |
 
 ## Política de risco

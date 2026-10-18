@@ -3,8 +3,8 @@ from datetime import timedelta
 from typing import Optional
 
 from controllers.rules.credibility import points_weighted_by_history
-from controllers.rules.transaction_context import TransactionContext
-from utils.money import brazilian_reais
+from controllers.rules.transaction_context import TransactionContext, is_same_owner
+from utils.money import brazilian_decimal, brazilian_reais
 
 
 UNREGISTERED_DEVICE_PIX_LIMIT_CENTS = 20000
@@ -28,6 +28,13 @@ class PixRule:
         return RuleHit(self.code, points, reason)
 
 
+def threshold_for_person_type(setting, person_type: str):
+    if person_type == "company":
+        return setting.company_threshold
+
+    return setting.threshold
+
+
 class EditablePixRule(PixRule):
     def evaluate(self, context: TransactionContext) -> Optional[RuleHit]:
         setting = context.setting(self.code)
@@ -45,13 +52,13 @@ class DeviceUsedByManySources(EditablePixRule):
     code = "device_used_by_many_sources"
 
     def evaluate_with(self, context, setting):
-        other_sources = context.pix_analysis_repository.count_other_sources_on_device(
+        other_individual_sources = context.pix_analysis_repository.count_other_individual_sources_on_device(
             context.pix.device_id, context.pix.source_document, context.window_start(setting.window_minutes), context.moment
         )
-        sources_on_device = other_sources + 1
+        individual_sources_on_device = other_individual_sources + (1 if context.pix.source_person_type == "individual" else 0)
 
-        if sources_on_device >= setting.threshold:
-            return self.hit(0, f"Aparelho usado por {sources_on_device} pagadores diferentes em pouco tempo")
+        if individual_sources_on_device >= setting.threshold:
+            return self.hit(0, f"Aparelho usado por {individual_sources_on_device} pagadores PF diferentes em pouco tempo")
         return None
 
 
@@ -214,7 +221,7 @@ class BurstOfPix(EditablePixRule):
         window_start = context.window_start(setting.window_minutes)
         attempts = 1 + sum(1 for analysis in context.source_analyses if analysis.transaction_date > window_start)
 
-        if attempts >= setting.threshold:
+        if attempts >= threshold_for_person_type(setting, context.pix.source_person_type):
             return self.hit(setting.points, f"{attempts} Pix do pagador em {setting.window_minutes} minutos")
         return None
 
@@ -233,7 +240,7 @@ class AmountAboveBaseline(EditablePixRule):
         if compared_amount > limit:
             return self.hit(
                 setting.points,
-                f"{brazilian_reais(compared_amount)} para o recebedor, acima de {setting.threshold} vezes a base de "
+                f"{brazilian_reais(compared_amount)} para o recebedor, acima de {brazilian_decimal(setting.threshold)} vezes a base de "
                 f"{brazilian_reais(context.baseline_amount)}",
             )
         return None
@@ -268,7 +275,7 @@ class MonthlyVolumeAboveTypical(EditablePixRule):
         if current_period_volume > float(setting.threshold) * typical_period_volume:
             return self.hit(
                 setting.points,
-                f"Volume de {brazilian_reais(current_period_volume)} em {current_period.days} dias, acima de {setting.threshold} "
+                f"Volume de {brazilian_reais(current_period_volume)} em {current_period.days} dias, acima de {brazilian_decimal(setting.threshold)} "
                 f"vezes o típico de {brazilian_reais(typical_period_volume)}",
             )
         return None
@@ -300,8 +307,9 @@ class NewDestinationAboveUsualCeiling(EditablePixRule):
 
     def evaluate_with(self, context, setting):
         compared_amount = context.accumulated_amount_to_destination
+        reaches_the_floor = compared_amount >= context.policy.amount_rules_floor_cents
 
-        if context.is_new_destination and compared_amount > context.usual_ceiling_amount:
+        if context.is_new_destination and reaches_the_floor and compared_amount > context.usual_ceiling_amount:
             return self.hit(
                 setting.points,
                 f"Destino novo recebendo {brazilian_reais(compared_amount)}, acima do teto habitual de "
@@ -361,9 +369,8 @@ class DestinationDocumentInManyAccounts(EditablePixRule):
             pix.destination_document, context.window_start(setting.window_minutes), context.moment
         )
         accounts.add((pix.destination_participant, pix.destination_branch, pix.destination_account_number))
-        threshold = setting.company_threshold if pix.destination_person_type == "company" else setting.threshold
 
-        if len(accounts) >= threshold:
+        if len(accounts) >= threshold_for_person_type(setting, pix.destination_person_type):
             return self.hit(setting.points, f"Recebedor recebendo em {len(accounts)} contas diferentes em pouco tempo")
         return None
 
@@ -372,7 +379,7 @@ class SameOwner(EditablePixRule):
     code = "same_owner"
 
     def evaluate_with(self, context, setting):
-        if context.pix.source_document == context.pix.destination_document:
+        if is_same_owner(context.pix):
             return self.hit(setting.points, "Pix para conta do mesmo titular")
         return None
 

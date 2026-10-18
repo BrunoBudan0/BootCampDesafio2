@@ -50,11 +50,11 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | Mediana | Mediana contínua (média dos dois do meio quando a quantidade é par) |
 | Mediana da população | `(N × mediana observada + 30 × ticket médio de referência) / (N + 30)`, com N = Pix aceitos de todos os pagadores com o mesmo par pagador e recebedor na janela de histórico. Com N = 0, vale o ticket médio de referência |
 | Base de comparação | `(n × mediana do pagador + 5 × mediana da população) / (n + 5)`, com n = Pix aceitos do pagador no mesmo par. Com n = 0, vale a mediana da população |
-| Teto habitual | Maior Pix aceito do pagador no histórico, de qualquer par. Em início frio, a base de comparação |
+| Teto habitual | O maior entre a base de comparação e o maior Pix aceito do pagador no histórico, de qualquer par, sem contar Pix para conta própria nem os aceitos em `(T menos 24 h, T]`. Um Pix pequeno não derruba o teto abaixo da base, uma transferência para conta própria não o infla, e um golpe confirmado no 2FA não vira teto no mesmo dia |
 | Pontos com familiaridade | Só pontua IP, local ou canal que nunca apareceu nos Pix aceitos do pagador no histórico. Os pontos são `piso(pontos × N / (N + k))`, com N = Pix aceitos do pagador no histórico: quanto mais histórico, mais estranho é um valor novo. A regra só é gravada quando o resultado é maior que zero. Com 10 pontos e k = 5: N = 1 dá 1, N = 3 dá 3, N = 20 dá 8. IP, local ou canal já usado não pontua |
 | Local | Latitude e longitude arredondadas em 2 casas, com arredondamento do Postgres (metade para longe do zero) |
 | Distância | Fórmula de haversine com raio da Terra de 6.371 km, sobre as coordenadas como vieram |
-| Velocidade | Distância dividida pelo tempo entre o Pix analisado e a tentativa anterior mais recente do pagador que tinha geolocalização. Tempo zero com distância maior que zero conta como velocidade infinita |
+| Velocidade | Distância dividida pelo tempo entre o Pix analisado e o Pix aceito mais recente do pagador que tinha geolocalização. Uma tentativa reprovada, como a de um invasor, não entra na conta. Distâncias abaixo de 50 km não são avaliadas, porque a localização por wi-fi ou antena erra alguns quilômetros. Tempo zero com distância de 50 km ou mais conta como velocidade infinita |
 | Volume mensal típico | Soma dos Pix aceitos do pagador no período de referência vezes a janela da regra (30 dias) dividida pela duração do período. O período de referência é `[início, T menos a janela]`, fechado nas duas pontas, com início no mais tarde entre `T menos 90 dias` e o primeiro Pix aceito do pagador. Com período de referência menor que a janela, a regra não é avaliada. Se o banco mudar a janela, o volume típico é calculado para a mesma duração |
 | Volume do mês atual | Valor do Pix mais o consumo de limite do pagador em `(T menos a janela da regra, T]` |
 | Comparações de valor | Sempre em centavos e sempre estritas: "acima de R$ 1.000" é `> 100000` |
@@ -63,7 +63,7 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 
 | Código | Dispara quando |
 |---|---|
-| `device_used_by_many_sources` | Documentos de pagador distintos nas tentativas com o mesmo `device_id` em `(T menos 24 h, T]`, contando o atual, `>= 5` |
+| `device_used_by_many_sources` | Documentos de pagador PF distintos nas tentativas com o mesmo `device_id` em `(T menos 24 h, T]`, contando o atual se for PF, `>= 5` |
 | `impossible_travel_on_unregistered_device` | Velocidade `> 900 km/h` e o aparelho não está cadastrado para o pagador |
 | `new_account_to_new_destination_far_above_cap` | Conta nova, destino novo (ver a definição em `new_destination_above_usual_ceiling`) e valor acumulado no recebedor `> 5 ×` teto de conta nova |
 | `nightly_limit_exceeded` | Pagador e recebedor PF, Pix à noite e a soma da noite (valor do Pix mais o consumo de limite PF para PF desde o início da noite) `>` limite noturno do pagador. Vale também em início frio. O limite em vigor em `T` sai do pedido mais recente com `requested_at <= T`: se ele já vale (`effective_at <= T`), é o valor dele; se ainda não vale (aumento pendente), é o limite em vigor imediatamente antes desse pedido. Sem pedido, R$ 1.000. Assim uma redução nunca é desfeita por um aumento pedido antes dela |
@@ -72,12 +72,12 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | `ip_unfamiliar`, `location_unfamiliar`, `channel_unfamiliar` | Fora do início frio, valor nunca usado nos Pix aceitos do pagador e pontos de familiaridade maiores que zero. O local só é avaliado se o Pix trouxer geolocalização. O canal é comparado em minúsculas |
 | `two_factor_denied_recently` | Alguma confirmação `denied` de análise do pagador com `confirmed_at` em `(T menos 24 h, T]` |
 | `new_account_above_cap` | Conta nova e valor acumulado no total `>` teto de conta nova (PF R$ 1.000, PJ R$ 10.000) |
-| `burst_of_pix` | Tentativas do pagador em `(T menos 5 min, T]`, contando a atual, `>= 5` |
+| `burst_of_pix` | Tentativas do pagador em `(T menos 5 min, T]`, contando a atual, `>= 5` para PF e `>= 50` para PJ, que paga em lote |
 | `amount_above_baseline` | Fora do início frio, valor acumulado no recebedor `>=` piso das regras de valor e `>` multiplicador × base de comparação |
 | `monthly_volume_above_typical` | Fora do início frio, período de referência pelo menos do tamanho da janela da regra, volume do mês atual `>=` piso e `> 3 ×` volume mensal típico |
 | `destination_account_opened_very_recently` | Conta de destino com menos de 7 dias. Vale 25 pontos, abaixo do limiar de alerta: sozinha não gera alerta |
 | `destination_account_opened_recently` | Conta de destino com menos de 30 dias e sem a regra anterior |
-| `new_destination_above_usual_ceiling` | Documento do recebedor ausente dos Pix aceitos do pagador anteriores à janela de curto prazo (destino novo) e valor acumulado no recebedor `>` teto habitual. Pix aceitos nas últimas 24 h ainda não tornam o destino conhecido, para o fracionamento num destino novo não escapar |
+| `new_destination_above_usual_ceiling` | Documento do recebedor ausente dos Pix aceitos do pagador anteriores à janela de curto prazo (destino novo) e valor acumulado no recebedor `>=` piso das regras de valor e `>` teto habitual. Pix aceitos nas últimas 24 h ainda não tornam o destino conhecido, para o fracionamento num destino novo não escapar |
 | `destination_receiving_from_many_sources` | Recebedor PF e documentos de pagador distintos nas tentativas para o mesmo documento de recebedor em `(T menos 1 h, T]` com valor `>=` piso das regras de valor, contando o atual se ele também atingir o piso, `>= 5` |
 | `destination_rejected_for_other_sources` | Documentos de outros pagadores com análise para o mesmo documento de recebedor em `(T menos 7 dias, T]` que teve 2FA recusado, ou que foi reprovada tendo entre as disparadas alguma regra da família contraparte ou `new_account_to_new_destination_far_above_cap`, `>= 2`. Análises em que esta regra disparou nunca contam. Reprovação só por sinal do pagador (limite noturno, aparelho compartilhado, viagem impossível) não conta |
 | `destination_document_in_many_accounts` | Contas de destino distintas (participante, agência e número) nas tentativas para o mesmo documento de recebedor em `(T menos 24 h, T]`, contando a atual, `>= 3` para PF e `>= 10` para PJ |
@@ -297,7 +297,7 @@ Essas conferências não entram na suíte, porque a regra do projeto é testar s
 - **Datas montadas pelo teste** (`tests/utils/clock.py`, fuso de São Paulo). Os Pix comuns são às 14h, para não cair no limite noturno. Só os testes de 2FA pendente usam "agora", porque o GET mostra pendente ou expirado pelo relógio.
 - **Recusa confere que nada mudou:** o Pix recusado não aparece no GET, o 2FA recusado continua sem resposta, e a política recusada não ganha versão.
 - **Testes de política devolvem a política ao modelo equilibrado** ao terminar (fixture `restore_bank_policy`). A suíte roda em sequência; rodar em paralelo misturaria as políticas.
-- **Premissa da população:** todo Pix aceito dos testes que não testa valor usa R$ 100,00. Só o teste do piso do fan-in grava 4 Pix de R$ 99,99 por rodada, o que não mexe na mediana. Assim, a mediana da população fica entre R$ 100,00 e o ticket médio do BCB, e os limites dos testes de valor têm folga para qualquer valor nessa faixa. Rode a suíte num banco recém-criado, sem dados manuais.
+- **Premissa da população:** todo Pix aceito dos testes que não testa valor usa R$ 100,00. Só o teste do piso do fan-in grava 4 Pix de R$ 99,99 por rodada, e o teste do teto habitual grava um Pix de R$ 10,00 numa loja (PF para PJ), o que não mexe nas medianas. Assim, a mediana da população fica entre R$ 100,00 e o ticket médio do BCB, e os limites dos testes de valor têm folga para qualquer valor nessa faixa. Rode a suíte num banco recém-criado, sem dados manuais.
 - **Datas do dia:** `today_at` usa a data de São Paulo fixada quando a suíte começa, para nenhum teste mudar de dia no meio se a meia-noite passar durante a rodada.
 
 ### O que cada arquivo prova

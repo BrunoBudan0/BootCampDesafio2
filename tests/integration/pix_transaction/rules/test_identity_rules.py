@@ -3,12 +3,14 @@ from datetime import timedelta
 from tests.utils.assertions import assert_rule_not_fired, rule_hit
 from tests.utils.clock import business_hours_today
 from tests.utils.pix_payload import (
+    CAMPINAS_LOCATION,
     MANAUS_LOCATION,
     RIO_DE_JANEIRO_LOCATION,
     SAO_PAULO_LOCATION,
     SAO_PAULO_NEARBY_LOCATION,
     new_individual_payee,
     new_individual_payer,
+    payer_on_another_device,
     pix_payload,
 )
 from tests.utils.random_generator import RandomGenerator
@@ -30,6 +32,38 @@ class TestImpossibleTravel:
         analysis = analyze(pix_payload(payer, payee, transaction_date + timedelta(hours=1), location=MANAUS_LOCATION))
 
         assert rule_hit(analysis, "impossible_travel")["points"] == 40
+
+    def test_short_trip_above_50_km_in_a_few_minutes_is_still_impossible(self):
+        transaction_date = business_hours_today()
+        payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 1)
+        analyze_expecting(pix_payload(payer, payee, transaction_date, location=SAO_PAULO_LOCATION), "approved", "Pix em São Paulo")
+
+        analysis = analyze(pix_payload(payer, payee, transaction_date + timedelta(minutes=3), location=CAMPINAS_LOCATION))
+
+        assert rule_hit(analysis, "impossible_travel")["points"] == 40
+
+    def test_location_change_below_50_km_is_not_travel_even_in_the_same_second(self):
+        transaction_date = business_hours_today()
+        payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 1)
+        analyze_expecting(pix_payload(payer, payee, transaction_date, location=SAO_PAULO_LOCATION), "approved", "Pix em São Paulo")
+
+        analysis = analyze(pix_payload(payer, payee, transaction_date, location=SAO_PAULO_NEARBY_LOCATION))
+
+        assert_rule_not_fired(analysis, "impossible_travel")
+
+    def test_travel_is_measured_from_the_last_accepted_pix_and_not_from_a_rejected_attempt(self):
+        transaction_date = business_hours_today()
+        payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 1)
+        analyze_expecting(pix_payload(payer, payee, transaction_date, location=SAO_PAULO_LOCATION), "approved", "Pix do dono em São Paulo")
+        analyze_expecting(
+            pix_payload(payer_on_another_device(payer), new_individual_payee(), transaction_date + timedelta(minutes=10), location=MANAUS_LOCATION),
+            "rejected",
+            "tentativa de outro aparelho em Manaus",
+        )
+
+        analysis = analyze(pix_payload(payer, payee, transaction_date + timedelta(minutes=20), location=SAO_PAULO_LOCATION))
+
+        assert_rule_not_fired(analysis, "impossible_travel")
 
     def test_travel_is_not_checked_without_geolocation_in_both_pix(self):
         transaction_date = business_hours_today()

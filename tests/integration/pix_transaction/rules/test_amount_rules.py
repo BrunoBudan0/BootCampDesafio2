@@ -15,6 +15,14 @@ class TestAmountAboveBaseline:
 
         assert rule_hit(analysis, "amount_above_baseline")["points"] == 25
 
+    def test_reason_shows_the_multiplier_as_a_plain_number(self):
+        transaction_date = business_hours_today()
+        payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
+
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
+
+        assert "acima de 5 vezes a base" in rule_hit(analysis, "amount_above_baseline")["reason"]
+
     def test_pix_below_five_times_the_baseline_is_within_the_pattern(self):
         transaction_date = business_hours_today()
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)

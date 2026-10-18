@@ -184,7 +184,7 @@ class TestTwoFactorAndHistory:
         payer, _, payload, _ = two_factor_pix(transaction_date)
         confirm_two_factor(payload["id"], "confirmed", transaction_date + timedelta(minutes=2))
 
-        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date + timedelta(hours=1), 100000))
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date + timedelta(hours=25), 100000))
 
         assert_rule_not_fired(analysis, "new_destination_above_usual_ceiling")
 
@@ -193,7 +193,7 @@ class TestTwoFactorAndHistory:
         payer, _, payload, _ = two_factor_pix(transaction_date)
         confirm_two_factor(payload["id"], "denied", transaction_date + timedelta(minutes=2))
 
-        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date + timedelta(hours=1), 100000))
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date + timedelta(hours=25), 100000))
 
         assert_rule_fired(analysis, "new_destination_above_usual_ceiling")
 

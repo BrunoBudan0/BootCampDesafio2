@@ -219,23 +219,23 @@ Análises com decisão `approved`, mais as com decisão `two_factor_required` e 
 
 | Código | Tipo | Família | Pontos | Limite | Janela |
 |---|---|---|---|---|---|
-| `device_used_by_many_sources` | eliminatória (reprova) | | | 5 pagadores | 24 h |
+| `device_used_by_many_sources` | eliminatória (reprova) | | | 5 pagadores PF | 24 h |
 | `impossible_travel_on_unregistered_device` | eliminatória (reprova) | | | 900 km/h | |
 | `new_account_to_new_destination_far_above_cap` | eliminatória (reprova) | | | 5 × teto de conta nova | |
 | `nightly_limit_exceeded` | regulatória (reprova) | | | Soma da noite PF para PF acima de R$ 1.000 ou do limite aprovado em `source_nightly_limit`, 20h às 6h | |
 | `unregistered_device_limit_exceeded` | regulatória (2FA) | | | R$ 200 por Pix e R$ 1.000 por dia, fixo | |
-| `impossible_travel` | pontuação | identidade | 40 | 900 km/h | |
+| `impossible_travel` | pontuação | identidade | 40 | 900 km/h, a partir de 50 km | |
 | `ip_unfamiliar` | pontuação | identidade | 10 (a definir) | k = 5 | |
 | `location_unfamiliar` | pontuação | identidade | 10 (a definir) | k = 5 | |
 | `channel_unfamiliar` | pontuação | identidade | 15 (a definir) | k = 5 | |
 | `two_factor_denied_recently` | pontuação | identidade | 30 (a definir) | | 24 h |
 | `new_account_above_cap` | pontuação | tempo | 40 | | |
-| `burst_of_pix` | pontuação | tempo | 25 | 5 Pix | 5 min |
+| `burst_of_pix` | pontuação | tempo | 25 | 5 Pix; pagador PJ: 50 | 5 min |
 | `amount_above_baseline` | pontuação | valor | 25 | 5 × base de comparação | |
 | `monthly_volume_above_typical` | pontuação | valor | 20 | 3 × volume mensal típico | 30 dias |
 | `destination_account_opened_very_recently` | pontuação | contraparte (relação) | 25 | 7 dias | |
 | `destination_account_opened_recently` | pontuação | contraparte (relação) | 20 | 30 dias | |
-| `new_destination_above_usual_ceiling` | pontuação | contraparte (relação) | 25 | | |
+| `new_destination_above_usual_ceiling` | pontuação | contraparte (relação) | 25 | a partir do piso das regras de valor | |
 | `destination_receiving_from_many_sources` | pontuação | contraparte (base) | 30 | 5 pagadores com Pix a partir do piso das regras de valor, só recebedor PF | 1 h |
 | `destination_rejected_for_other_sources` | pontuação | contraparte (base) | 20 | 2 outros pagadores com 2FA recusado ou reprovação com regra de contraparte | 7 dias |
 | `destination_document_in_many_accounts` | pontuação | contraparte (base) | 30 | 3 contas de destino; recebedor PJ: 10 | 24 h |
@@ -253,11 +253,14 @@ Regras de convivência:
 - `destination_rejected_for_other_sources` só soma risco e nunca reprova sozinha. Conta os 2FA recusados e os Pix reprovados em que disparou alguma regra de contraparte ou `new_account_to_new_destination_far_above_cap`. Reprovação por motivo só do pagador (limite noturno, dispositivo compartilhado, viagem impossível) não diz nada sobre o recebedor e fica de fora. Ignora as análises em que ela mesma disparou, para não se realimentar.
 - `destination_receiving_from_many_sources` só conta pagadores cujo Pix atingiu `amount_rules_floor_cents`, para racha de conta e vaquinha de valor baixo não parecerem conta laranja.
 - Risco do recebedor: os redutores abatem só os sinais da relação (`counterparty_signal = 'relationship'`). Os sinais da base (`counterparty_signal = 'base'`) entram inteiros. `destination_risk = max(0, sinais da relação - mesma titularidade - destino conhecido) + sinais da base`.
-- O limite de PJ em `destination_document_in_many_accounts` fica em `company_threshold` e o banco aumenta criando uma versão nova da política.
+- O limite de PJ fica em `company_threshold`: o recebedor PJ em `destination_document_in_many_accounts` e o pagador PJ em `burst_of_pix`, porque empresa paga em lote. O banco muda criando uma versão nova da política.
+- `device_used_by_many_sources` conta só pagadores PF: empresas que pagam pelo mesmo computador, como um escritório de contabilidade, não são uma fazenda de aparelhos.
+- A viagem impossível compara o Pix analisado com o último Pix aceito do pagador com geolocalização, e só a partir de 50 km. Uma tentativa reprovada de um invasor não contamina o próximo Pix do dono, e a imprecisão da localização por wi-fi ou antena não vira viagem.
+- O teto habitual nunca fica abaixo da base de comparação e ignora os Pix para conta própria e os aceitos na janela de curto prazo.
 - Valor acumulado de cada regra de valor (princípio 8):
   - total do pagador: `new_account_above_cap`, `nightly_limit_exceeded` (soma da noite) e `unregistered_device_limit_exceeded` (soma do dia no mesmo dispositivo);
   - para o mesmo recebedor: `amount_above_baseline`, `new_destination_above_usual_ceiling` e `new_account_to_new_destination_far_above_cap`;
-  - o piso das regras de valor também é comparado com o acumulado, para dez Pix de R$ 99 não escaparem dele.
+  - o piso das regras de valor também é comparado com o acumulado, para dez Pix de R$ 99 não escaparem dele, e vale também para `new_destination_above_usual_ceiling`.
 
 ## Como as regras viram decisão
 

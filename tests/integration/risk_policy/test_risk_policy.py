@@ -6,6 +6,7 @@ from tests.utils.assertions import assert_error, assert_rule_fired, assert_rule_
 from tests.utils.clock import business_hours_today
 from tests.utils.pix_payload import (
     new_company_payee,
+    new_company_payer,
     new_individual_payee,
     new_individual_payer,
     pix_payload,
@@ -286,6 +287,29 @@ class TestEditRiskPolicy:
 
         assert_rule_fired(analysis, "monthly_volume_above_typical")
 
+    def test_raised_amount_floor_also_silences_the_new_destination_ceiling(self, restore_bank_policy):
+        transaction_date = business_hours_today()
+        payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
+        edit_bank_policy({"change_reason": "Piso das regras de valor em R$ 10.000", "parameters": {"amount_rules_floor_cents": 1000000}}, "subir o piso")
+
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
+
+        assert_rule_not_fired(analysis, "new_destination_above_usual_ceiling")
+
+    def test_company_threshold_of_the_burst_is_the_limit_for_company_payers(self, restore_bank_policy):
+        first_moment = business_hours_today()
+        edit_bank_policy(
+            {"change_reason": "Rajada de PJ com o mesmo limite da PF", "rules": [{"code": "burst_of_pix", "company_threshold": 5}]},
+            "editar o limite de PJ da rajada",
+        )
+        company = new_company_payer()
+        for minute in range(4):
+            analyze(pix_payload(company, new_individual_payee(), first_moment + timedelta(minutes=minute)))
+
+        analysis = analyze(pix_payload(company, new_individual_payee(), first_moment + timedelta(minutes=4)))
+
+        assert_rule_fired(analysis, "burst_of_pix")
+
     def test_company_threshold_is_the_limit_for_company_destinations(self, restore_bank_policy):
         transaction_date = business_hours_today()
         edit_bank_policy(
@@ -307,7 +331,7 @@ class TestEditRiskPolicy:
             ({"change_reason": "Mexe no limite noturno", "rules": [{"code": "nightly_limit_exceeded", "enabled": False}]}, "QIT001013"),
             ({"change_reason": "Janela onde não existe", "rules": [{"code": "same_owner", "window_minutes": 60}]}, "QIT001014"),
             ({"change_reason": "Limite onde não existe", "rules": [{"code": "new_account_above_cap", "threshold": 2}]}, "QIT001014"),
-            ({"change_reason": "Limite de PJ onde não existe", "rules": [{"code": "burst_of_pix", "company_threshold": 10}]}, "QIT001014"),
+            ({"change_reason": "Limite de PJ onde não existe", "rules": [{"code": "known_destination", "company_threshold": 10}]}, "QIT001014"),
             ({"change_reason": "Pontos em eliminatória", "rules": [{"code": "device_used_by_many_sources", "points": 10}]}, "QIT001014"),
             ({"change_reason": "Meio pagador", "rules": [{"code": "burst_of_pix", "threshold": 2.5}]}, "QIT001014"),
             ({"change_reason": "Mais de duas casas", "rules": [{"code": "amount_above_baseline", "threshold": 4.005}]}, "QIT001014"),
