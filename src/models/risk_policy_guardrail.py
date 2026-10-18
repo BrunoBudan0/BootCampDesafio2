@@ -22,14 +22,14 @@ class RiskPolicyGuardrail(Base):
         if self.policy_parameter_name is not None:
             return self.policy_parameter_name
 
-        return f"{self.rule.code}.{self.rule_setting_field}"
+        return f"{self.rule.name}.{self.rule_setting_field}"
 
     def value_in(self, version):
         if self.policy_parameter_name is not None:
             return getattr(version, self.policy_parameter_name)
 
         for setting in version.rule_settings:
-            if setting.rule.code == self.rule.code:
+            if setting.rule.name == self.rule.name:
                 return getattr(setting, self.rule_setting_field)
 
         return None

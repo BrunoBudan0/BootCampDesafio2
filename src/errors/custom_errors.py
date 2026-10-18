@@ -15,48 +15,48 @@ class RiskPolicyVersionNotFound(QIException):
 class UnknownRule(QIException):
     code = "QIT001012"
 
-    def __init__(self, rule_code: str) -> None:
+    def __init__(self, rule_name: str) -> None:
         title = "Unknown Rule"
         http_status = 422
-        description = f"The rule {rule_code} is not part of the rule catalog."
-        translation = f"A regra {rule_code} não faz parte do catálogo de regras."
+        description = f"The rule {rule_name} is not part of the rule catalog."
+        translation = f"A regra {rule_name} não faz parte do catálogo de regras."
         super().__init__(title, self.code, http_status, description, translation)
 
 
 class RegulatoryRuleNotEditable(QIException):
     code = "QIT001013"
 
-    def __init__(self, rule_code: str) -> None:
+    def __init__(self, rule_name: str) -> None:
         title = "Regulatory Rule Not Editable"
         http_status = 422
-        description = f"The rule {rule_code} comes from a BCB regulation and its values cannot be edited."
-        translation = f"A regra {rule_code} vem de norma do BCB e os valores dela não podem ser editados."
+        description = f"The rule {rule_name} comes from a BCB regulation and its values cannot be edited."
+        translation = f"A regra {rule_name} vem de norma do BCB e os valores dela não podem ser editados."
         super().__init__(title, self.code, http_status, description, translation)
 
 
 class RuleSettingNotApplicable(QIException):
     code = "QIT001014"
 
-    def __init__(self, rule_code: str, setting_name: str, refused_value=None) -> None:
+    def __init__(self, rule_name: str, setting_name: str, refused_value=None) -> None:
         title = "Rule Setting Not Applicable"
         http_status = 422
         if refused_value is None:
-            description = f"The rule {rule_code} does not use the setting {setting_name}."
-            translation = f"A regra {rule_code} não usa o ajuste {setting_name}."
+            description = f"The rule {rule_name} does not use the setting {setting_name}."
+            translation = f"A regra {rule_name} não usa o ajuste {setting_name}."
         else:
-            description = f"The rule {rule_code} does not accept {refused_value} as {setting_name}: whole units for counts and days, at most 2 decimal places otherwise."
-            translation = f"A regra {rule_code} não aceita {refused_value} em {setting_name}: contagens e dias são inteiros, e os demais limites têm no máximo 2 casas."
+            description = f"The rule {rule_name} does not accept {refused_value} as {setting_name}: whole units for counts and days, at most 2 decimal places otherwise."
+            translation = f"A regra {rule_name} não aceita {refused_value} em {setting_name}: contagens e dias são inteiros, e os demais limites têm no máximo 2 casas."
         super().__init__(title, self.code, http_status, description, translation)
 
 
 class RepeatedRuleSetting(QIException):
     code = "QIT001015"
 
-    def __init__(self, rule_code: str) -> None:
+    def __init__(self, rule_name: str) -> None:
         title = "Repeated Rule Setting"
         http_status = 422
-        description = f"The rule {rule_code} appears more than once in the edit."
-        translation = f"A regra {rule_code} aparece mais de uma vez na edição."
+        description = f"The rule {rule_name} appears more than once in the edit."
+        translation = f"A regra {rule_name} aparece mais de uma vez na edição."
         super().__init__(title, self.code, http_status, description, translation)
 
 

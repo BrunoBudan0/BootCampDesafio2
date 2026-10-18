@@ -85,13 +85,13 @@ class TransactionContext:
     ) -> None:
         self.pix = pix
         self.policy_version = policy_version
-        self.rule_settings_by_code = {setting.rule.code: setting for setting in policy_version.rule_settings}
+        self.rule_settings_by_rule_name = {setting.rule.name: setting for setting in policy_version.rule_settings}
         self.pix_analysis_repository = pix_analysis_repository
         self.source_repository = source_repository
         self.transaction_date = pix.transaction_date
 
-    def rule_setting(self, rule_code: str):
-        return self.rule_settings_by_code[rule_code]
+    def rule_setting(self, rule_name: str):
+        return self.rule_settings_by_rule_name[rule_name]
 
     def window_start(self, minutes) -> datetime:
         return self.transaction_date - timedelta(minutes=float(minutes))

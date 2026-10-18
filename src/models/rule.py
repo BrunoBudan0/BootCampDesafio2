@@ -8,7 +8,7 @@ class Rule(Base):
     __tablename__ = "rule"
 
     id = Column(Integer, primary_key=True)
-    code = Column(String(80), nullable=False, unique=True)
+    name = Column(String(80), nullable=False, unique=True)
     kind = Column(String(20), nullable=False)
     family = Column(String(20))
     counterparty_signal = Column(String(15))

@@ -7,7 +7,7 @@ CREATE TABLE decision(
 
 CREATE TABLE rule(
     id                              SERIAL PRIMARY KEY,
-    code                            VARCHAR(80) NOT NULL,
+    name                            VARCHAR(80) NOT NULL,
     kind                            VARCHAR(20) NOT NULL,
     family                          VARCHAR(20),
     counterparty_signal             VARCHAR(15),
@@ -17,7 +17,7 @@ CREATE TABLE rule(
     uses_company_threshold          BOOLEAN NOT NULL DEFAULT false,
     description                     VARCHAR(255) NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(code),
+    UNIQUE(name),
     CONSTRAINT ck_rule_kind CHECK (kind IN ('scoring', 'reducer', 'eliminatory', 'regulatory')),
     CONSTRAINT ck_rule_family CHECK (family IN ('identity', 'velocity', 'amount', 'counterparty')),
     CONSTRAINT ck_rule_threshold_unit CHECK (threshold_unit IN ('count', 'days', 'km_per_hour', 'multiplier', 'credibility_weight')),
@@ -283,9 +283,9 @@ INSERT INTO decision (enumerator) VALUES
 ('two_factor_required'),
 ('rejected');
 
-INSERT INTO rule (code, kind, family, counterparty_signal, forced_decision_id, threshold_unit, uses_window_minutes, uses_company_threshold, description)
+INSERT INTO rule (name, kind, family, counterparty_signal, forced_decision_id, threshold_unit, uses_window_minutes, uses_company_threshold, description)
 SELECT
-    catalog.code,
+    catalog.name,
     catalog.kind,
     catalog.family,
     catalog.counterparty_signal,
@@ -319,7 +319,7 @@ FROM (VALUES
     ('same_owner', 'reducer', NULL, NULL, NULL, NULL, false, false, 'Documento do pagador igual ao do recebedor.'),
     ('known_destination', 'reducer', NULL, NULL, NULL, 'count', false, false, 'Recebedor com vários Pix aceitos do pagador.'),
     ('long_registered_device', 'reducer', NULL, NULL, NULL, 'days', false, false, 'Dispositivo cadastrado há muito tempo.')
-) AS catalog(code, kind, family, counterparty_signal, forced_decision, threshold_unit, uses_window_minutes, uses_company_threshold, description)
+) AS catalog(name, kind, family, counterparty_signal, forced_decision, threshold_unit, uses_window_minutes, uses_company_threshold, description)
 LEFT JOIN decision ON decision.enumerator = catalog.forced_decision;
 
 INSERT INTO risk_policy (name, kind) VALUES
@@ -486,8 +486,8 @@ FROM (VALUES
     ('destination_document_in_many_accounts', 'company_threshold', 'higher', 15),
     ('known_destination', 'threshold', 'lower', 2),
     ('long_registered_device', 'threshold', 'lower', 15)
-) AS limit_row(rule_code, rule_setting_field, loosening_direction, loosest_accepted_value)
-JOIN rule ON rule.code = limit_row.rule_code;
+) AS limit_row(rule_name, rule_setting_field, loosening_direction, loosest_accepted_value)
+JOIN rule ON rule.name = limit_row.rule_name;
 
 INSERT INTO risk_policy_rule_setting (risk_policy_version_id, rule_id, enabled, points, threshold, window_minutes, company_threshold)
 SELECT
@@ -495,7 +495,7 @@ SELECT
     rule.id,
     true,
     setting.points,
-    CASE rule.code
+    CASE rule.name
         WHEN 'amount_above_baseline' THEN policy_multiplier.amount_above_baseline_multiplier
         WHEN 'amount_far_above_baseline' THEN policy_multiplier.amount_far_above_baseline_multiplier
         ELSE setting.threshold
@@ -525,8 +525,8 @@ FROM (VALUES
     ('same_owner', -30, NULL, NULL, NULL),
     ('known_destination', -20, 3, NULL, NULL),
     ('long_registered_device', -10, 30, NULL, NULL)
-) AS setting(code, points, threshold, window_minutes, company_threshold)
-JOIN rule ON rule.code = setting.code
+) AS setting(rule_name, points, threshold, window_minutes, company_threshold)
+JOIN rule ON rule.name = setting.rule_name
 CROSS JOIN risk_policy_version
 JOIN risk_policy ON risk_policy.id = risk_policy_version.risk_policy_id
 JOIN (VALUES

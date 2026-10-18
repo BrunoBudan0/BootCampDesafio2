@@ -10,9 +10,9 @@ ANCHOR_CASE_ACCEPTED_HISTORY_COUNT = 20
 
 @dataclass(frozen=True)
 class AnchorCase:
-    code: str
+    name: str
     description: str
-    rule_codes: tuple
+    rule_names: tuple
     minimum_decision: str
     requires_alert: bool
 
@@ -30,16 +30,16 @@ class AnchorOutcome:
 
 ANCHOR_CASES = (
     AnchorCase(
-        code="account_takeover_with_high_amount",
+        name="account_takeover_with_high_amount",
         description="Invasão de conta com valor alto",
-        rule_codes=("ip_unfamiliar", "location_unfamiliar", "channel_unfamiliar", "amount_far_above_baseline", "new_destination_above_usual_ceiling"),
+        rule_names=("ip_unfamiliar", "location_unfamiliar", "channel_unfamiliar", "amount_far_above_baseline", "new_destination_above_usual_ceiling"),
         minimum_decision="rejected",
         requires_alert=False,
     ),
     AnchorCase(
-        code="mule_flagged_by_the_base",
+        name="mule_flagged_by_the_base",
         description="Laranja marcado pela base",
-        rule_codes=(
+        rule_names=(
             "new_destination_above_usual_ceiling",
             "destination_receiving_from_many_sources",
             "destination_document_in_many_accounts",
@@ -50,9 +50,9 @@ ANCHOR_CASES = (
         requires_alert=True,
     ),
     AnchorCase(
-        code="false_call_center",
+        name="false_call_center",
         description="Falsa central",
-        rule_codes=("amount_far_above_baseline", "new_destination_above_usual_ceiling", "long_registered_device"),
+        rule_names=("amount_far_above_baseline", "new_destination_above_usual_ceiling", "long_registered_device"),
         minimum_decision="two_factor_required",
         requires_alert=True,
     ),
@@ -66,14 +66,14 @@ def anchor_case_points(setting) -> int:
     return setting.points
 
 
-def anchor_case_outcome(anchor_case: AnchorCase, version, rules_by_code: dict) -> AnchorOutcome:
-    settings_by_code = {setting.rule.code: setting for setting in version.rule_settings}
+def anchor_case_outcome(anchor_case: AnchorCase, version, rules_by_name: dict) -> AnchorOutcome:
+    settings_by_rule_name = {setting.rule.name: setting for setting in version.rule_settings}
     rule_hits = [
-        RuleHit(code, anchor_case_points(settings_by_code[code]), anchor_case.description)
-        for code in anchor_case.rule_codes
-        if settings_by_code[code].enabled
+        RuleHit(rule_name, anchor_case_points(settings_by_rule_name[rule_name]), anchor_case.description)
+        for rule_name in anchor_case.rule_names
+        if settings_by_rule_name[rule_name].enabled
     ]
-    analysis_decision = AnalysisDecision(rules_by_code)
+    analysis_decision = AnalysisDecision(rules_by_name)
     score_parts = analysis_decision.score_parts_of(rule_hits)
     risk_score = analysis_decision.risk_score(score_parts, version)
 

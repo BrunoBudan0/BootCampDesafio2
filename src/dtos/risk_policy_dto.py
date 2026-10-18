@@ -23,7 +23,7 @@ def policy_reference(version: Optional[RiskPolicyVersion]) -> Optional[dict]:
 
 def rule_setting_response(setting: RiskPolicyRuleSetting) -> dict:
     return {
-        "code": setting.rule.code,
+        "code": setting.rule.name,
         "kind": setting.rule.kind,
         "family": setting.rule.family,
         "enabled": setting.enabled,
@@ -72,9 +72,9 @@ def guardrails_response(guardrails: list, reference_version: RiskPolicyVersion, 
         ],
         "anchor_cases": [
             {
-                "code": anchor_case.code,
+                "code": anchor_case.name,
                 "description": anchor_case.description,
-                "rules": list(anchor_case.rule_codes),
+                "rules": list(anchor_case.rule_names),
                 "minimum_decision": anchor_case.minimum_decision,
                 "requires_alert": anchor_case.requires_alert,
             }

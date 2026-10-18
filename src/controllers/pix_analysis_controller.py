@@ -52,10 +52,10 @@ class PixAnalysisController(BaseController):
         if recorded_analysis is not None:
             return self.replayed_analysis(recorded_analysis, pix.payload_hash)
 
-        rules_by_code = self.rule_repository.find_all_by_code()
+        rules_by_name = self.rule_repository.find_all_by_name()
         policy_version = self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME)
         context = TransactionContext(pix, policy_version, self.pix_analysis_repository, self.source_repository)
-        outcome = AnalysisDecision(rules_by_code).decide(context)
+        outcome = AnalysisDecision(rules_by_name).decide(context)
         registers_first_seen_device = (
             outcome.decision == "approved" and not context.source_has_any_accepted_pix and context.registered_device is None
         )
@@ -89,7 +89,7 @@ class PixAnalysisController(BaseController):
             risk_policy_version=policy_version,
             two_factor_expires_at=outcome.two_factor_expires_at,
             rule_hits=[
-                PixAnalysisRuleHit(rule=rules_by_code[rule_hit.code], points=rule_hit.points, reason=rule_hit.reason)
+                PixAnalysisRuleHit(rule=rules_by_name[rule_hit.rule_name], points=rule_hit.points, reason=rule_hit.reason)
                 for rule_hit in outcome.rule_hits
             ],
         )

@@ -13,7 +13,7 @@ def isoformat_in_transaction_offset(moment: Optional[datetime], analysis: PixAna
 
 def rule_hit_response(rule_hit: PixAnalysisRuleHit) -> dict:
     return {
-        "code": rule_hit.rule.code,
+        "code": rule_hit.rule.name,
         "kind": rule_hit.rule.kind,
         "family": rule_hit.rule.family,
         "points": rule_hit.points,

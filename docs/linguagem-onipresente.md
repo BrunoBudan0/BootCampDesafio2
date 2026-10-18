@@ -9,7 +9,7 @@ Cada termo abaixo tem um significado só, e ele vale na conversa, nos documentos
 1. Um termo, um significado. Se um termo começar a servir para duas coisas, ele vira dois termos.
 2. Conversa em português, código em inglês. A coluna "No código" é a tradução oficial e não tem sinônimo.
 3. O contrato da API manda nos nomes: o que é do pagador se chama `source` e o que é do recebedor se chama `destination`.
-4. A tabela de regras do README usa os códigos de regra daqui.
+4. A tabela de regras do README usa os nomes de regra daqui.
 
 ## Palavras que não usamos
 
@@ -85,7 +85,7 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Termo | No código | Definição | Não confundir com |
 |---|---|---|---|
 | Regra | `rule` | Uma pergunta sobre o Pix com resultado definido. Tem código único | |
-| Código da regra | `rule.code` | Nome da regra em inglês. Aparece no código, no `metadata` e no README | |
+| Nome da regra | `rule.name` | Identificador da regra em inglês, como `burst_of_pix`. Aparece no código e no README; na API sai no campo `code` | Descrição da regra |
 | Tipo de regra | `rule.kind` | `scoring`, `reducer`, `eliminatory` ou `regulatory` | Família |
 | Regra de pontuação | `scoring` | Soma pontos na pontuação de risco | |
 | Redutor | `reducer` | Tira pontos só da parte da pontuação que ele desmente: o aparelho cadastrado tira da identidade, o destino conhecido tira dos sinais da relação, e a mesma titularidade tira dos sinais da relação e do valor | |

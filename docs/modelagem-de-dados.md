@@ -50,7 +50,7 @@ Catálogo de regras, semeado. Diz o que cada regra é e qual a forma dos seus aj
 | Coluna | Tipo | Restrição |
 |---|---|---|
 | `id` | SERIAL | PK |
-| `code` | VARCHAR(80) | UNIQUE |
+| `name` | VARCHAR(80) | UNIQUE. Nome da regra em inglês, como `burst_of_pix`. Sai na API como `code` |
 | `kind` | VARCHAR(20) | CHECK em `scoring`, `reducer`, `eliminatory`, `regulatory` |
 | `family` | VARCHAR(20) NULL | CHECK em `identity`, `velocity`, `amount`, `counterparty`. Preenchida se e somente se `kind = 'scoring'` |
 | `counterparty_signal` | VARCHAR(15) NULL | CHECK em `relationship`, `base`. Preenchida se e somente se `family = 'counterparty'` |

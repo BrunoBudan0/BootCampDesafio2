@@ -62,8 +62,8 @@ class RiskPolicyController(BaseController):
         return guardrails_response(self.risk_policy_guardrail_repository.find_all(), reference_version, ANCHOR_CASES)
 
     def create_bank_policy_version(self, payload: dict) -> dict:
-        rules_by_code = self.rule_repository.find_all_by_code()
-        rule_edits = self.validated_rule_edits(payload.get("rules", []), rules_by_code)
+        rules_by_name = self.rule_repository.find_all_by_name()
+        rule_edits = self.validated_rule_edits(payload.get("rules", []), rules_by_name)
         risk_acknowledged = payload.get("risk_acknowledged", False)
         current_version = self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME)
         base_version = self.risk_policy_repository.find_current_version(payload.get("based_on_template", RiskPolicy.BANK_NAME))
@@ -78,11 +78,11 @@ class RiskPolicyController(BaseController):
             **dict(base_version.parameters(), **payload.get("parameters", {})),
         )
         new_version.rule_settings = [
-            self.edited_rule_setting(setting, rule_edits.get(setting.rule.code, {}))
+            self.edited_rule_setting(setting, rule_edits.get(setting.rule.name, {}))
             for setting in base_version.rule_settings
         ]
         self.ensure_consistent_policy(new_version)
-        self.ensure_within_guardrails(new_version, rules_by_code, risk_acknowledged)
+        self.ensure_within_guardrails(new_version, rules_by_name, risk_acknowledged)
 
         try:
             self.risk_policy_repository.add_version(new_version)
@@ -96,7 +96,7 @@ class RiskPolicyController(BaseController):
 
         return response
 
-    def ensure_within_guardrails(self, version: RiskPolicyVersion, rules_by_code: dict, risk_acknowledged: bool) -> None:
+    def ensure_within_guardrails(self, version: RiskPolicyVersion, rules_by_name: dict, risk_acknowledged: bool) -> None:
         reference_version = self.risk_policy_repository.find_current_version(REFERENCE_POLICY_NAME)
         loosened_settings = self.rules_switched_off_against_reference(version, reference_version)
 
@@ -113,7 +113,7 @@ class RiskPolicyController(BaseController):
                 loosened_settings.append(guardrail.setting_name)
 
         missed_anchor_cases = [
-            anchor_case for anchor_case in ANCHOR_CASES if not anchor_case_outcome(anchor_case, version, rules_by_code).reaches_the_minimum_of(anchor_case)
+            anchor_case for anchor_case in ANCHOR_CASES if not anchor_case_outcome(anchor_case, version, rules_by_name).reaches_the_minimum_of(anchor_case)
         ]
 
         if missed_anchor_cases:
@@ -124,52 +124,52 @@ class RiskPolicyController(BaseController):
 
     @staticmethod
     def rules_switched_off_against_reference(version: RiskPolicyVersion, reference_version: RiskPolicyVersion) -> list:
-        enabled_in_reference = {setting.rule.code: setting.enabled for setting in reference_version.rule_settings}
+        enabled_in_reference = {setting.rule.name: setting.enabled for setting in reference_version.rule_settings}
         switched_off = []
 
         for setting in version.rule_settings:
-            rule_code = setting.rule.code
+            rule_name = setting.rule.name
 
-            if setting.enabled or not enabled_in_reference[rule_code] or setting.rule.kind == "reducer":
+            if setting.enabled or not enabled_in_reference[rule_name] or setting.rule.kind == "reducer":
                 continue
 
             if setting.rule.kind == "eliminatory":
                 raise OutsideSafetyRange(
-                    f"The eliminatory rule {rule_code} cannot be disabled.",
-                    f"A regra eliminatória {rule_code} não pode ser desligada.",
+                    f"The eliminatory rule {rule_name} cannot be disabled.",
+                    f"A regra eliminatória {rule_name} não pode ser desligada.",
                 )
 
-            switched_off.append(f"{rule_code}.enabled")
+            switched_off.append(f"{rule_name}.enabled")
 
         return switched_off
 
-    def validated_rule_edits(self, rule_edit_items: list, rules_by_code: dict) -> dict:
+    def validated_rule_edits(self, rule_edit_items: list, rules_by_name: dict) -> dict:
         rule_edits = {}
 
         for rule_edit_item in rule_edit_items:
-            rule_code = rule_edit_item["code"]
+            rule_name = rule_edit_item["code"]
 
-            if rule_code in rule_edits:
-                raise RepeatedRuleSetting(rule_code)
+            if rule_name in rule_edits:
+                raise RepeatedRuleSetting(rule_name)
 
-            rule = rules_by_code.get(rule_code)
+            rule = rules_by_name.get(rule_name)
 
             if rule is None:
-                raise UnknownRule(rule_code)
+                raise UnknownRule(rule_name)
 
             if rule.kind == "regulatory":
-                raise RegulatoryRuleNotEditable(rule_code)
+                raise RegulatoryRuleNotEditable(rule_name)
 
             setting_changes = {field: value for field, value in rule_edit_item.items() if field != "code"}
 
             for field, value in setting_changes.items():
                 if not self.rule_accepts_setting(rule, field):
-                    raise RuleSettingNotApplicable(rule_code, field)
+                    raise RuleSettingNotApplicable(rule_name, field)
 
                 if field in DECIMAL_SETTING_FIELDS and not self.rule_accepts_setting_value(rule, field, value):
-                    raise RuleSettingNotApplicable(rule_code, field, value)
+                    raise RuleSettingNotApplicable(rule_name, field, value)
 
-            rule_edits[rule_code] = setting_changes
+            rule_edits[rule_name] = setting_changes
 
         return rule_edits
 
@@ -207,7 +207,7 @@ class RiskPolicyController(BaseController):
 
     @staticmethod
     def ensure_consistent_policy(version: RiskPolicyVersion) -> None:
-        settings_by_code = {setting.rule.code: setting for setting in version.rule_settings}
+        settings_by_rule_name = {setting.rule.name: setting for setting in version.rule_settings}
 
         if version.rejection_score_threshold <= version.two_factor_score_threshold:
             raise InconsistentRiskPolicy(
@@ -221,21 +221,21 @@ class RiskPolicyController(BaseController):
                 "O teto da relação não pode ser maior que o teto da família contraparte.",
             )
 
-        for rule_code, setting in settings_by_code.items():
+        for rule_name, setting in settings_by_rule_name.items():
             if setting.rule.kind == "scoring" and setting.points < 0:
                 raise InconsistentRiskPolicy(
-                    f"The scoring rule {rule_code} cannot have negative points.",
-                    f"A regra de pontuação {rule_code} não pode ter pontos negativos.",
+                    f"The scoring rule {rule_name} cannot have negative points.",
+                    f"A regra de pontuação {rule_name} não pode ter pontos negativos.",
                 )
 
             if setting.rule.kind == "reducer" and setting.points > 0:
                 raise InconsistentRiskPolicy(
-                    f"The reducer {rule_code} cannot have positive points.",
-                    f"O redutor {rule_code} não pode ter pontos positivos.",
+                    f"The reducer {rule_name} cannot have positive points.",
+                    f"O redutor {rule_name} não pode ter pontos positivos.",
                 )
 
-        very_recent_account_days = settings_by_code["destination_account_opened_very_recently"].threshold
-        recent_account_days = settings_by_code["destination_account_opened_recently"].threshold
+        very_recent_account_days = settings_by_rule_name["destination_account_opened_very_recently"].threshold
+        recent_account_days = settings_by_rule_name["destination_account_opened_recently"].threshold
 
         if very_recent_account_days >= recent_account_days:
             raise InconsistentRiskPolicy(
@@ -243,8 +243,8 @@ class RiskPolicyController(BaseController):
                 "A faixa de conta de destino muito recente precisa ser menor que a de conta de destino recente.",
             )
 
-        above_baseline_multiplier = settings_by_code["amount_above_baseline"].threshold
-        far_above_baseline_multiplier = settings_by_code["amount_far_above_baseline"].threshold
+        above_baseline_multiplier = settings_by_rule_name["amount_above_baseline"].threshold
+        far_above_baseline_multiplier = settings_by_rule_name["amount_far_above_baseline"].threshold
 
         if far_above_baseline_multiplier <= above_baseline_multiplier:
             raise InconsistentRiskPolicy(
@@ -252,7 +252,7 @@ class RiskPolicyController(BaseController):
                 "O multiplicador do valor muito fora do padrão precisa ser maior que o do valor fora do padrão.",
             )
 
-        monthly_volume_window_minutes = settings_by_code["monthly_volume_above_typical"].window_minutes
+        monthly_volume_window_minutes = settings_by_rule_name["monthly_volume_above_typical"].window_minutes
 
         if monthly_volume_window_minutes >= version.history_window_days * MINUTES_PER_DAY:
             raise InconsistentRiskPolicy(

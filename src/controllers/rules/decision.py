@@ -34,9 +34,9 @@ from controllers.rules.transaction_context import TransactionContext
 
 DECISION_SEVERITY = {"approved": 0, "two_factor_required": 1, "rejected": 2}
 SCORE_PARTS_ABATED_BY_REDUCER = {
-    LongRegisteredDevice.code: ("identity",),
-    KnownDestination.code: ("relationship",),
-    SameOwner.code: ("relationship", "amount"),
+    LongRegisteredDevice.name: ("identity",),
+    KnownDestination.name: ("relationship",),
+    SameOwner.name: ("relationship", "amount"),
 }
 
 
@@ -66,8 +66,8 @@ def fired_rule_hits(rules: list, context: TransactionContext) -> list:
 
 
 class AnalysisDecision:
-    def __init__(self, rules_by_code: dict) -> None:
-        self.rules_by_code = rules_by_code
+    def __init__(self, rules_by_name: dict) -> None:
+        self.rules_by_name = rules_by_name
         self.eliminatory_rules = [
             DeviceUsedByManySources(),
             ImpossibleTravelOnUnregisteredDevice(),
@@ -89,7 +89,7 @@ class AnalysisDecision:
             DestinationAccountOpenedRecently(),
             NewDestinationAboveUsualCeiling(),
             DestinationReceivingFromManySources(),
-            DestinationRejectedForOtherSources(rules_by_code[DestinationRejectedForOtherSources.code].id),
+            DestinationRejectedForOtherSources(rules_by_name[DestinationRejectedForOtherSources.name].id),
             DestinationDocumentInManyAccounts(),
             SameOwner(),
             KnownDestination(),
@@ -109,7 +109,7 @@ class AnalysisDecision:
         decision = self.decision_for_risk_score(risk_score, context.policy_version)
 
         for regulatory_hit in regulatory_hits:
-            forced_decision = self.rules_by_code[regulatory_hit.code].forced_decision.enumerator
+            forced_decision = self.rules_by_name[regulatory_hit.rule_name].forced_decision.enumerator
             if DECISION_SEVERITY[forced_decision] > DECISION_SEVERITY[decision]:
                 decision = forced_decision
 
@@ -129,9 +129,9 @@ class AnalysisDecision:
         score_parts = ScoreParts()
 
         for rule_hit in scoring_hits:
-            rule = self.rules_by_code[rule_hit.code]
+            rule = self.rules_by_name[rule_hit.rule_name]
             if rule.kind == "reducer":
-                for score_part in SCORE_PARTS_ABATED_BY_REDUCER[rule.code]:
+                for score_part in SCORE_PARTS_ABATED_BY_REDUCER[rule.name]:
                     score_parts.reductions[score_part] += rule_hit.points
             else:
                 score_parts.points[rule.counterparty_signal or rule.family] += rule_hit.points

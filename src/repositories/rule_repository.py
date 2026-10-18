@@ -7,6 +7,6 @@ class RuleRepository:
     def __init__(self, context) -> None:
         self.session = context.db_session
 
-    def find_all_by_code(self) -> dict:
+    def find_all_by_name(self) -> dict:
         rules = self.session.scalars(select(Rule).order_by(Rule.id)).all()
-        return {rule.code: rule for rule in rules}
+        return {rule.name: rule for rule in rules}

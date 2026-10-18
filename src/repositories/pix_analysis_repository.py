@@ -15,7 +15,7 @@ from models import (
 )
 
 
-NEW_ACCOUNT_TO_NEW_DESTINATION_FAR_ABOVE_CAP_RULE_CODE = "new_account_to_new_destination_far_above_cap"
+NEW_ACCOUNT_TO_NEW_DESTINATION_FAR_ABOVE_CAP_RULE_NAME = "new_account_to_new_destination_far_above_cap"
 
 
 class PixAnalysisRepository:
@@ -122,7 +122,7 @@ class PixAnalysisRepository:
             .join(Rule, Rule.id == PixAnalysisRuleHit.rule_id)
             .where(
                 PixAnalysisRuleHit.pix_analysis_id == PixAnalysis.id,
-                or_(Rule.family == "counterparty", Rule.code == NEW_ACCOUNT_TO_NEW_DESTINATION_FAR_ABOVE_CAP_RULE_CODE),
+                or_(Rule.family == "counterparty", Rule.name == NEW_ACCOUNT_TO_NEW_DESTINATION_FAR_ABOVE_CAP_RULE_NAME),
             )
             .exists()
         )

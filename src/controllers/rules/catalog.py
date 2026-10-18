@@ -13,19 +13,19 @@ UNREGISTERED_DEVICE_DAILY_LIMIT_CENTS = 100000
 
 @dataclass(frozen=True)
 class RuleHit:
-    code: str
+    rule_name: str
     points: int
     reason: str
 
 
 class PixRule:
-    code = ""
+    name = ""
 
     def evaluate(self, context: TransactionContext) -> Optional[RuleHit]:
         raise NotImplementedError
 
     def rule_hit(self, points: int, reason: str) -> RuleHit:
-        return RuleHit(self.code, points, reason)
+        return RuleHit(self.name, points, reason)
 
 
 def threshold_for_person_type(rule_setting, person_type: str):
@@ -37,7 +37,7 @@ def threshold_for_person_type(rule_setting, person_type: str):
 
 class EditablePixRule(PixRule):
     def evaluate(self, context: TransactionContext) -> Optional[RuleHit]:
-        rule_setting = context.rule_setting(self.code)
+        rule_setting = context.rule_setting(self.name)
 
         if not rule_setting.enabled:
             return None
@@ -49,7 +49,7 @@ class EditablePixRule(PixRule):
 
 
 class DeviceUsedByManySources(EditablePixRule):
-    code = "device_used_by_many_sources"
+    name = "device_used_by_many_sources"
 
     def evaluate_with(self, context, rule_setting):
         other_individual_sources = context.pix_analysis_repository.count_other_individual_sources_on_device(
@@ -63,7 +63,7 @@ class DeviceUsedByManySources(EditablePixRule):
 
 
 class ImpossibleTravelOnUnregisteredDevice(EditablePixRule):
-    code = "impossible_travel_on_unregistered_device"
+    name = "impossible_travel_on_unregistered_device"
 
     def evaluate_with(self, context, rule_setting):
         travel_speed_kmh = context.travel_speed_kmh
@@ -74,7 +74,7 @@ class ImpossibleTravelOnUnregisteredDevice(EditablePixRule):
 
 
 class NewAccountToNewDestinationFarAboveCap(EditablePixRule):
-    code = "new_account_to_new_destination_far_above_cap"
+    name = "new_account_to_new_destination_far_above_cap"
 
     def evaluate_with(self, context, rule_setting):
         far_above_cap_limit_cents = rule_setting.threshold * context.new_account_cap_cents
@@ -89,7 +89,7 @@ class NewAccountToNewDestinationFarAboveCap(EditablePixRule):
 
 
 class NightlyLimitExceeded(PixRule):
-    code = "nightly_limit_exceeded"
+    name = "nightly_limit_exceeded"
 
     def evaluate(self, context):
         pix = context.pix
@@ -111,7 +111,7 @@ class NightlyLimitExceeded(PixRule):
 
 
 class UnregisteredDeviceLimitExceeded(PixRule):
-    code = "unregistered_device_limit_exceeded"
+    name = "unregistered_device_limit_exceeded"
 
     def evaluate(self, context):
         if context.is_device_registered:
@@ -130,7 +130,7 @@ class UnregisteredDeviceLimitExceeded(PixRule):
 
 
 class ImpossibleTravel(EditablePixRule):
-    code = "impossible_travel"
+    name = "impossible_travel"
 
     def evaluate_with(self, context, rule_setting):
         travel_speed_kmh = context.travel_speed_kmh
@@ -161,7 +161,7 @@ class UnfamiliarValueRule(EditablePixRule):
 
 
 class IpUnfamiliar(UnfamiliarValueRule):
-    code = "ip_unfamiliar"
+    name = "ip_unfamiliar"
     value_label = "IP"
 
     def value_of(self, context, analysis):
@@ -169,7 +169,7 @@ class IpUnfamiliar(UnfamiliarValueRule):
 
 
 class LocationUnfamiliar(UnfamiliarValueRule):
-    code = "location_unfamiliar"
+    name = "location_unfamiliar"
     value_label = "Local"
 
     def value_of(self, context, analysis):
@@ -177,7 +177,7 @@ class LocationUnfamiliar(UnfamiliarValueRule):
 
 
 class ChannelUnfamiliar(UnfamiliarValueRule):
-    code = "channel_unfamiliar"
+    name = "channel_unfamiliar"
     value_label = "Canal"
 
     def value_of(self, context, analysis):
@@ -185,7 +185,7 @@ class ChannelUnfamiliar(UnfamiliarValueRule):
 
 
 class TwoFactorDeniedRecently(EditablePixRule):
-    code = "two_factor_denied_recently"
+    name = "two_factor_denied_recently"
 
     def evaluate_with(self, context, rule_setting):
         window_start = context.window_start(rule_setting.window_minutes)
@@ -202,7 +202,7 @@ class TwoFactorDeniedRecently(EditablePixRule):
 
 
 class NewAccountAboveCap(EditablePixRule):
-    code = "new_account_above_cap"
+    name = "new_account_above_cap"
 
     def evaluate_with(self, context, rule_setting):
         if context.is_new_account and context.accumulated_total_amount > context.new_account_cap_cents:
@@ -215,7 +215,7 @@ class NewAccountAboveCap(EditablePixRule):
 
 
 class BurstOfPix(EditablePixRule):
-    code = "burst_of_pix"
+    name = "burst_of_pix"
 
     def evaluate_with(self, context, rule_setting):
         window_start = context.window_start(rule_setting.window_minutes)
@@ -247,7 +247,7 @@ def baseline_reason(compared_amount: int, rule_setting, context) -> str:
 
 
 class AmountFarAboveBaseline(EditablePixRule):
-    code = "amount_far_above_baseline"
+    name = "amount_far_above_baseline"
 
     def evaluate_with(self, context, rule_setting):
         compared_amount = amount_compared_with_the_baseline(context)
@@ -258,7 +258,7 @@ class AmountFarAboveBaseline(EditablePixRule):
 
 
 class AmountAboveBaseline(EditablePixRule):
-    code = "amount_above_baseline"
+    name = "amount_above_baseline"
 
     def evaluate_with(self, context, rule_setting):
         compared_amount = amount_compared_with_the_baseline(context)
@@ -266,14 +266,14 @@ class AmountAboveBaseline(EditablePixRule):
         if compared_amount is None or not exceeds_baseline_multiplier(compared_amount, rule_setting, context):
             return None
 
-        if exceeds_baseline_multiplier(compared_amount, context.rule_setting(AmountFarAboveBaseline.code), context):
+        if exceeds_baseline_multiplier(compared_amount, context.rule_setting(AmountFarAboveBaseline.name), context):
             return None
 
         return self.rule_hit(rule_setting.points, baseline_reason(compared_amount, rule_setting, context))
 
 
 class MonthlyVolumeAboveTypical(EditablePixRule):
-    code = "monthly_volume_above_typical"
+    name = "monthly_volume_above_typical"
 
     def evaluate_with(self, context, rule_setting):
         if context.is_cold_start:
@@ -308,7 +308,7 @@ class MonthlyVolumeAboveTypical(EditablePixRule):
 
 
 class DestinationAccountOpenedVeryRecently(EditablePixRule):
-    code = "destination_account_opened_very_recently"
+    name = "destination_account_opened_very_recently"
 
     def evaluate_with(self, context, rule_setting):
         if context.destination_account_age < timedelta(days=float(rule_setting.threshold)):
@@ -317,10 +317,10 @@ class DestinationAccountOpenedVeryRecently(EditablePixRule):
 
 
 class DestinationAccountOpenedRecently(EditablePixRule):
-    code = "destination_account_opened_recently"
+    name = "destination_account_opened_recently"
 
     def evaluate_with(self, context, rule_setting):
-        very_recent_rule_setting = context.rule_setting(DestinationAccountOpenedVeryRecently.code)
+        very_recent_rule_setting = context.rule_setting(DestinationAccountOpenedVeryRecently.name)
         is_very_recent = very_recent_rule_setting.enabled and context.destination_account_age < timedelta(days=float(very_recent_rule_setting.threshold))
 
         if not is_very_recent and context.destination_account_age < timedelta(days=float(rule_setting.threshold)):
@@ -329,7 +329,7 @@ class DestinationAccountOpenedRecently(EditablePixRule):
 
 
 class NewDestinationAboveUsualCeiling(EditablePixRule):
-    code = "new_destination_above_usual_ceiling"
+    name = "new_destination_above_usual_ceiling"
 
     def evaluate_with(self, context, rule_setting):
         compared_amount = context.accumulated_amount_to_destination
@@ -351,7 +351,7 @@ def new_destination_reason(compared_amount: int, ceiling_multiplier, usual_ceili
 
 
 class DestinationReceivingFromManySources(EditablePixRule):
-    code = "destination_receiving_from_many_sources"
+    name = "destination_receiving_from_many_sources"
 
     def evaluate_with(self, context, rule_setting):
         if context.pix.destination_person_type != "individual":
@@ -373,7 +373,7 @@ class DestinationReceivingFromManySources(EditablePixRule):
 
 
 class DestinationRejectedForOtherSources(EditablePixRule):
-    code = "destination_rejected_for_other_sources"
+    name = "destination_rejected_for_other_sources"
 
     def __init__(self, own_rule_id: int) -> None:
         self.own_rule_id = own_rule_id
@@ -393,7 +393,7 @@ class DestinationRejectedForOtherSources(EditablePixRule):
 
 
 class DestinationDocumentInManyAccounts(EditablePixRule):
-    code = "destination_document_in_many_accounts"
+    name = "destination_document_in_many_accounts"
 
     def evaluate_with(self, context, rule_setting):
         pix = context.pix
@@ -408,7 +408,7 @@ class DestinationDocumentInManyAccounts(EditablePixRule):
 
 
 class SameOwner(EditablePixRule):
-    code = "same_owner"
+    name = "same_owner"
 
     def evaluate_with(self, context, rule_setting):
         if is_same_owner(context.pix):
@@ -417,7 +417,7 @@ class SameOwner(EditablePixRule):
 
 
 class KnownDestination(EditablePixRule):
-    code = "known_destination"
+    name = "known_destination"
 
     def evaluate_with(self, context, rule_setting):
         if context.accepted_count_to_destination >= rule_setting.threshold:
@@ -426,7 +426,7 @@ class KnownDestination(EditablePixRule):
 
 
 class LongRegisteredDevice(EditablePixRule):
-    code = "long_registered_device"
+    name = "long_registered_device"
 
     def evaluate_with(self, context, rule_setting):
         registered_device = context.registered_device
