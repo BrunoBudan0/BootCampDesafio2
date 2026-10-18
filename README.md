@@ -4,8 +4,6 @@
 
 Motor antifraude de Pix do Bootcamp QI Tech 2026: uma API que recebe o pedido de Pix antes de o dinheiro sair e decide se ele é aprovado, se precisa de 2FA ou se é reprovado, sempre com o motivo.
 
-Os termos do projeto estão em [docs/linguagem-onipresente.md](docs/linguagem-onipresente.md), o modelo de dados em [docs/modelagem-de-dados.md](docs/modelagem-de-dados.md), e as definições exatas que os testes cobram em [docs/testes-erros-e-schemas.md](docs/testes-erros-e-schemas.md).
-
 ## Como o motor de decisão funciona
 
 O motor é o do banco de quem paga. Ele recebe o Pix em `POST /pix/transaction`, monta o contexto da transação (o Pix, o histórico do pagador, o que a base viu do recebedor e a política de risco vigente), avalia as 24 regras do catálogo e devolve `approved`, `two_factor_required` ou `rejected`. Toda análise fica gravada com as regras que dispararam, os pontos, o motivo de cada uma e a versão da política que decidiu, e pode ser consultada em `GET /pix/transaction/{id}`.
@@ -226,7 +224,41 @@ Esse desenho segue o sigilo bancário (LC 105/2001) e a LGPD: o banco é o contr
 | `GET /risk-policy/guardrails` | A política de referência, as faixas de segurança e os casos-âncora |
 | `POST /risk-policy/versions` | Cria uma versão nova da política: só o que vier no corpo muda, o resto é herdado. Afrouxar exige o aceite do risco |
 
-Todo erro sai com código QIT e corpo `{title, description, translation, code}`. Os códigos estão em [docs/testes-erros-e-schemas.md](docs/testes-erros-e-schemas.md).
+### Códigos de erro
+
+Todo erro sai com código QIT e corpo `{title, description, translation, code}`.
+
+| Código | HTTP | Quando | Rotas |
+|---|---|---|---|
+| QIT000001 | 400 | O corpo não segue o JSON Schema, não é JSON válido em UTF-8, ou traz número que não é finito (NaN, Infinity), que o JSON Schema não barra | Todas com corpo |
+| QIT000002 | 403 | Sem `INTERNAL-TOKEN` ou com token errado | Todas, menos `/` e `/health_check` |
+| QIT000404 | 404 | Rota inexistente | Qualquer |
+| QIT000405 | 405 | Método não aceito na rota | Qualquer |
+| QIT000500 | 500 | Erro inesperado | Qualquer |
+| QIT001001 | 404 | Pix sem análise gravada, ou `pix_id` no caminho fora do formato do `id` (um byte nulo, por exemplo, que o Postgres não aceita) | GET do Pix, confirmação de 2FA |
+| QIT001002 | 409 | `id` já analisado com outro conteúdo | POST do Pix |
+| QIT001003 | 422 | CPF ou CNPJ com dígito verificador errado, ou CPF com todos os dígitos iguais | POST do Pix, limite noturno |
+| QIT001004 | 422 | Data com formato certo que não existe no calendário (30 de fevereiro, 25 horas), com ano fora de 1900 a 2999, ou com fuso fora de -12:00 a +14:00 | POST do Pix, confirmação de 2FA, limite noturno |
+| QIT001005 | 422 | IP com caracteres válidos que não é um IPv4 nem um IPv6 | POST do Pix |
+| QIT001006 | 422 | Conta de origem ou de destino aberta depois da data do Pix | POST do Pix |
+| QIT001007 | 409 | Confirmação de 2FA para análise que não pediu 2FA | Confirmação de 2FA |
+| QIT001008 | 409 | Confirmação de 2FA com resultado diferente do já gravado | Confirmação de 2FA |
+| QIT001009 | 422 | `answered_at` antes do Pix ou depois de `two_factor_expires_at` | Confirmação de 2FA |
+| QIT001010 | 422 | Limite noturno pedido para CNPJ | Limite noturno |
+| QIT001011 | 404 | Versão de política inexistente | GET de versão |
+| QIT001012 | 422 | Código de regra desconhecido na edição | Edição da política |
+| QIT001013 | 422 | Tentativa de editar uma regra regulatória | Edição da política |
+| QIT001014 | 422 | Ajuste que a regra não usa (janela, limite, limite de PJ ou pontos numa regra sem esse ajuste), limite com mais de 2 casas decimais, limite fracionado em regra de unidade `count` ou `days`, ou limite acima de 3650 em regra de unidade `days` | Edição da política |
+| QIT001015 | 422 | A mesma regra repetida na edição | Edição da política |
+| QIT001016 | 422 | Política resultante incoerente: reprovação `<=` 2FA, pontos negativos em regra de pontuação, pontos positivos em redutor, faixa de 7 dias `>=` faixa de 30 dias, janela do volume mensal `>=` janela de histórico, teto da relação acima do teto da contraparte, multiplicador do valor muito fora do padrão `<=` o do valor fora do padrão | Edição da política |
+| QIT001017 | 409 | Duas edições simultâneas tentaram criar a mesma versão | Edição da política |
+| QIT001018 | 422 | Valor além da faixa de segurança, ou regra eliminatória desligada | Edição da política |
+| QIT001019 | 422 | Algum caso-âncora deixaria de chegar à decisão mínima. A mensagem lista todos os que falham | Edição da política |
+| QIT001020 | 422 | A edição afrouxa a política em relação à referência sem `risk_acknowledged`. A mensagem lista o que afrouxou | Edição da política |
+
+**Por que 400 e 422 são diferentes:** 400 quer dizer "não consegui ler o pedido", e é o schema que decide. 422 quer dizer "li, entendi, e o valor não pode existir": um CPF com o formato certo e o dígito errado, ou uma data que passa no padrão e não existe no calendário. É a mesma separação do Base Service (`InvalidDocumentNumber` e `InvalidBirthdate`).
+
+**Por que pedido recusado não é gravado:** um pedido que não passa no schema ou na validação não é um Pix. Os testes de recusa do Pix e do 2FA conferem pelo GET que nada ficou gravado, e os da política conferem que nenhuma versão nova foi criada.
 
 ## Como rodar e testar
 
@@ -254,7 +286,7 @@ Rodar os testes, com a API de pé:
 pytest
 ```
 
-São 334 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
+São 349 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
 
 A API atende em `http://localhost:3000`. Toda rota, menos `/` e `/health_check`, exige o header `INTERNAL-TOKEN` (o padrão é `default_token`).
 
