@@ -44,8 +44,8 @@ class RuleSettingNotApplicable(QIException):
             description = f"The rule {rule_name} does not use the setting {setting_name}."
             translation = f"A regra {rule_name} não usa o ajuste {setting_name}."
         else:
-            description = f"The rule {rule_name} does not accept {refused_value} as {setting_name}: whole units for counts and days, at most 2 decimal places otherwise."
-            translation = f"A regra {rule_name} não aceita {refused_value} em {setting_name}: contagens e dias são inteiros, e os demais limites têm no máximo 2 casas."
+            description = f"The rule {rule_name} does not accept {refused_value} as {setting_name}: whole units for counts and days, at most 3650 days, at most 2 decimal places otherwise."
+            translation = f"A regra {rule_name} não aceita {refused_value} em {setting_name}: contagens e dias são inteiros, dias vão até 3650, e os demais limites têm no máximo 2 casas."
         super().__init__(title, self.code, http_status, description, translation)
 
 
@@ -119,8 +119,8 @@ class InvalidDate(QIException):
     def __init__(self, field_name: str) -> None:
         title = "Invalid Date"
         http_status = 422
-        description = f"The date in {field_name} does not exist or has a UTC offset outside -12:00 to +14:00."
-        translation = f"A data em {field_name} não existe ou tem fuso fora de -12:00 a +14:00."
+        description = f"The date in {field_name} does not exist, is outside the years 1900 to 2999 or has a UTC offset outside -12:00 to +14:00."
+        translation = f"A data em {field_name} não existe, está fora dos anos 1900 a 2999 ou tem fuso fora de -12:00 a +14:00."
         super().__init__(title, self.code, http_status, description, translation)
 
 

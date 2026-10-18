@@ -10,12 +10,12 @@
         "change_reason": {
             "type": "string",
             "maxLength": 255,
-            "pattern": "\\S"
+            "pattern": "^[^\\u0000\\ud800-\\udfff]*[^\\s\\u0000\\ud800-\\udfff][^\\u0000\\ud800-\\udfff]*$"
         },
         "requested_by": {
             "type": "string",
             "maxLength": 100,
-            "pattern": "\\S"
+            "pattern": "^[^\\u0000\\ud800-\\udfff]*[^\\s\\u0000\\ud800-\\udfff][^\\u0000\\ud800-\\udfff]*$"
         },
         "risk_acknowledged": {
             "type": "boolean"

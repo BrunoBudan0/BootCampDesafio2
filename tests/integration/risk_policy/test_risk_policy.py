@@ -211,6 +211,17 @@ class TestEditRiskPolicy:
         assert find_rule_setting(created, "amount_above_baseline")["threshold"] == 4.5
         assert find_rule_setting(current_bank_policy(), "amount_above_baseline")["threshold"] == 4.5
 
+    def test_ten_years_is_accepted_as_a_threshold_in_days_and_pix_keep_being_analyzed(self, restore_bank_policy):
+        created = edit_bank_policy(
+            {"change_reason": "Aparelho só abate depois de 10 anos", "rules": [{"code": "long_registered_device", "threshold": 3650}]},
+            "editar o prazo do aparelho cadastrado",
+        )
+
+        analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today()))
+
+        assert find_rule_setting(created, "long_registered_device")["threshold"] == 3650
+        assert analysis["metadata"]["policy"]["version"] == created["version"]
+
     def test_old_version_stays_readable_and_unchanged(self, restore_bank_policy):
         before = current_bank_policy()
         edit_bank_policy({"change_reason": "Muda a validade do 2FA", "parameters": {"two_factor_validity_minutes": 5}}, "editar a política")
@@ -354,6 +365,12 @@ class TestEditRiskPolicy:
             ({"change_reason": "Mais de duas casas", "rules": [{"code": "amount_above_baseline", "threshold": 4.005}]}, "QIT001014"),
             ({"change_reason": "Limite com três casas", "rules": [{"code": "amount_above_baseline", "threshold": 4.555}]}, "QIT001014"),
             ({"change_reason": "Limite que viraria zero", "rules": [{"code": "amount_above_baseline", "threshold": 0.001}]}, "QIT001014"),
+            ({"change_reason": "Aparelho cadastrado há mais de 10 anos", "rules": [{"code": "long_registered_device", "threshold": 3651}]}, "QIT001014"),
+            ({"change_reason": "Aparelho cadastrado há um milhão de dias", "rules": [{"code": "long_registered_device", "threshold": 1000000}]}, "QIT001014"),
+            (
+                {"change_reason": "Conta de destino recente por milênios", "rules": [{"code": "destination_account_opened_recently", "threshold": 9999999999}]},
+                "QIT001014",
+            ),
             (
                 {"change_reason": "Limite de PJ com três casas", "rules": [{"code": "destination_document_in_many_accounts", "company_threshold": 10.005}]},
                 "QIT001014",
@@ -392,6 +409,9 @@ class TestEditRiskPolicy:
             {"change_reason": "Ajuste vazio", "rules": [{"code": "burst_of_pix"}]},
             {"change_reason": "Tipo errado", "parameters": {"two_factor_score_threshold": "40"}},
             {"change_reason": "Aceite sem autor", "risk_acknowledged": True},
+            {"change_reason": "Motivo com \u0000 no meio"},
+            {"change_reason": "Motivo com meio caractere \ud800"},
+            {"change_reason": "Autor com byte nulo", "requested_by": "analista\u0000"},
         ],
     )
     def test_invalid_body_is_refused_with_400_and_creates_no_version(self, invalid_body):

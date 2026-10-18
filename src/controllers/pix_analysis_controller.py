@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -26,6 +27,7 @@ from repositories import (
 
 CREATED_STATUS_CODE = 201
 REPLAYED_STATUS_CODE = 200
+PIX_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}")
 
 
 class PixAnalysisController(BaseController):
@@ -178,6 +180,9 @@ class PixAnalysisController(BaseController):
         return REPLAYED_STATUS_CODE, self.recorded_analysis_response(pix_id)
 
     def analysis_or_not_found(self, pix_id: str) -> PixAnalysis:
+        if PIX_ID_PATTERN.fullmatch(pix_id) is None:
+            raise PixAnalysisNotFound(pix_id)
+
         analysis = self.pix_analysis_repository.find_by_pix_id(pix_id)
 
         if analysis is None:

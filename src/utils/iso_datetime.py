@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 
 SMALLEST_UTC_OFFSET = timedelta(hours=-12)
 LARGEST_UTC_OFFSET = timedelta(hours=14)
+SMALLEST_YEAR = 1900
+LARGEST_YEAR = 2999
 
 
 def parsed_datetime_with_offset(text: str):
@@ -12,6 +14,9 @@ def parsed_datetime_with_offset(text: str):
         return None
 
     if moment.utcoffset() is None or not SMALLEST_UTC_OFFSET <= moment.utcoffset() <= LARGEST_UTC_OFFSET:
+        return None
+
+    if not SMALLEST_YEAR <= moment.year <= LARGEST_YEAR:
         return None
 
     return moment

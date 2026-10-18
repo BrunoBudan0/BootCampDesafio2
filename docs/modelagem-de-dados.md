@@ -358,7 +358,7 @@ As regras abaixo valem para os dados gravados, mas não são CHECK no banco: que
 | Regra | Onde é garantida |
 |---|---|
 | Valor do Pix e limite noturno maiores que zero | Schema (`amount_cents`, mínimo 1) |
-| Fuso entre -12:00 e +14:00 | `parsed_datetime_with_offset` (422 QIT001004) |
+| Fuso entre -12:00 e +14:00 e ano entre 1900 e 2999 | `parsed_datetime_with_offset` (422 QIT001004) |
 | Documento é CPF ou CNPJ válido, guardado sem pontuação e em maiúsculas | Schema e `required_document` (422 QIT001003) |
 | Tipo de pessoa coerente com o documento | `person_type_of`, que deriva um do outro |
 | ISPB com 8 dígitos, agência e conta só com dígitos | Schema |

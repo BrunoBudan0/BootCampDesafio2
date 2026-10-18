@@ -81,10 +81,11 @@ class TestSourceNightlyLimit:
 
         assert_error(status, body, 400, "QIT000001")
 
-    def test_impossible_request_date_is_refused_with_422(self):
+    @pytest.mark.parametrize("impossible_date", ["2026-02-30T09:00:00-03:00", "9999-12-31T23:00:00+00:00"])
+    def test_impossible_request_date_is_refused_with_422(self, impossible_date):
         status, body = RequestGenerator.POST_source_nightly_limit(
             RandomGenerator.generate_cpf(),
-            {"nightly_limit_cents": 500000, "requested_at": "2026-02-30T09:00:00-03:00"},
+            {"nightly_limit_cents": 500000, "requested_at": impossible_date},
         )
 
         assert_error(status, body, 422, "QIT001004")

@@ -25,6 +25,11 @@ class TestPixTransactionGet:
 
         assert_error(status, body, 404, "QIT001001")
 
+    def test_pix_id_with_a_null_byte_returns_404_with_qit001001(self):
+        status, body = RequestGenerator.GET_pix_transaction("pix%00id")
+
+        assert_error(status, body, 404, "QIT001001")
+
     def test_get_without_internal_token_is_refused_with_403(self):
         payload = pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today())
         analyze(payload)

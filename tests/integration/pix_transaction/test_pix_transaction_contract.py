@@ -194,6 +194,38 @@ class TestPixTransactionContract:
         assert_error(status, body, 422, "QIT001004")
         assert_nothing_was_recorded(payload["id"])
 
+    @pytest.mark.parametrize(
+        "changed_dates",
+        [
+            [
+                (["transaction_date"], "0001-01-02T10:00:00+00:00"),
+                (["source_account", "opening_date"], "0001-01-01T10:00:00+00:00"),
+                (["destination_account", "opening_date"], "0001-01-01T10:00:00+00:00"),
+            ],
+            [(["source_account", "opening_date"], "0001-01-01T00:00:00+14:00")],
+            [(["destination_account", "opening_date"], "1899-12-31T23:59:59-03:00")],
+            [(["transaction_date"], "3000-01-01T10:00:00-03:00")],
+        ],
+    )
+    def test_date_outside_the_years_1900_to_2999_is_refused_with_422_and_not_recorded(self, changed_dates):
+        payload = valid_payload()
+        changed_payload = payload
+        for path, date_text in changed_dates:
+            changed_payload = payload_with_changed_field(changed_payload, path, date_text)
+
+        status, body = RequestGenerator.POST_pix_transaction(changed_payload)
+
+        assert_error(status, body, 422, "QIT001004")
+        assert_nothing_was_recorded(payload["id"])
+
+    def test_account_opened_in_1900_is_accepted(self):
+        payload = payload_with_changed_field(valid_payload(), ["source_account", "opening_date"], "1900-01-01T00:00:00-03:00")
+
+        status, body = RequestGenerator.POST_pix_transaction(payload)
+
+        assert status == 201
+        assert body["status"] in DECISION_STATUSES
+
     @pytest.mark.parametrize("invalid_ip", ["999.1.1.1", "10.0.0", "1:2:3", "::::::"])
     def test_ip_that_does_not_exist_is_refused_with_422_and_not_recorded(self, invalid_ip):
         payload = valid_payload()

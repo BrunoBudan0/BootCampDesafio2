@@ -31,6 +31,7 @@ MINUTES_PER_DAY = 1440
 DECIMAL_SETTING_PLACES = Decimal("0.01")
 DECIMAL_SETTING_FIELDS = ("threshold", "company_threshold")
 WHOLE_UNIT_THRESHOLDS = ("count", "days")
+LARGEST_THRESHOLD_IN_DAYS = 3650
 
 
 class RiskPolicyController(BaseController):
@@ -189,6 +190,9 @@ class RiskPolicyController(BaseController):
         decimal_value = Decimal(str(value))
 
         if decimal_value != decimal_value.quantize(DECIMAL_SETTING_PLACES):
+            return False
+
+        if field == "threshold" and rule.threshold_unit == "days" and decimal_value > LARGEST_THRESHOLD_IN_DAYS:
             return False
 
         counts_whole_units = field == "company_threshold" or rule.threshold_unit in WHOLE_UNIT_THRESHOLDS

@@ -114,6 +114,11 @@ class TestTwoFactorConfirmation:
 
         assert_error(status, body, 404, "QIT001001")
 
+    def test_pix_id_with_a_null_byte_is_refused_with_404(self):
+        status, body = RequestGenerator.POST_two_factor_confirmation("pix%00id", two_factor_answer_body("confirmed", business_hours_today()))
+
+        assert_error(status, body, 404, "QIT001001")
+
     def test_confirmation_after_the_validity_is_refused_with_422_and_not_recorded(self):
         transaction_date = business_hours_today()
         _, _, payload, _ = new_account_pix_waiting_two_factor(transaction_date)

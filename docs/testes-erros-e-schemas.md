@@ -179,10 +179,10 @@ Todo erro tem o corpo `{title, description, translation, code}`.
 | QIT000404 | 404 | Rota inexistente | Qualquer |
 | QIT000405 | 405 | Método não aceito na rota | Qualquer |
 | QIT000500 | 500 | Erro inesperado | Qualquer |
-| QIT001001 | 404 | Pix sem análise gravada | GET do Pix, confirmação de 2FA |
+| QIT001001 | 404 | Pix sem análise gravada, ou `pix_id` no caminho fora do formato do `id` (um byte nulo, por exemplo, que o Postgres não aceita) | GET do Pix, confirmação de 2FA |
 | QIT001002 | 409 | `id` já analisado com outro conteúdo | POST do Pix |
 | QIT001003 | 422 | CPF ou CNPJ com dígito verificador errado, ou CPF com todos os dígitos iguais | POST do Pix, limite noturno |
-| QIT001004 | 422 | Data com formato certo que não existe no calendário (30 de fevereiro, 25 horas) ou com fuso fora de -12:00 a +14:00 | POST do Pix, confirmação de 2FA, limite noturno |
+| QIT001004 | 422 | Data com formato certo que não existe no calendário (30 de fevereiro, 25 horas), com ano fora de 1900 a 2999, ou com fuso fora de -12:00 a +14:00 | POST do Pix, confirmação de 2FA, limite noturno |
 | QIT001005 | 422 | IP com caracteres válidos que não é um IPv4 nem um IPv6 | POST do Pix |
 | QIT001006 | 422 | Conta de origem ou de destino aberta depois da data do Pix | POST do Pix |
 | QIT001007 | 409 | Confirmação de 2FA para análise que não pediu 2FA | Confirmação de 2FA |
@@ -192,7 +192,7 @@ Todo erro tem o corpo `{title, description, translation, code}`.
 | QIT001011 | 404 | Versão de política inexistente | GET de versão |
 | QIT001012 | 422 | Código de regra desconhecido na edição | Edição da política |
 | QIT001013 | 422 | Tentativa de editar uma regra regulatória | Edição da política |
-| QIT001014 | 422 | Ajuste que a regra não usa (janela, limite, limite de PJ ou pontos numa regra sem esse ajuste), limite com mais de 2 casas decimais, ou limite fracionado em regra de unidade `count` ou `days` | Edição da política |
+| QIT001014 | 422 | Ajuste que a regra não usa (janela, limite, limite de PJ ou pontos numa regra sem esse ajuste), limite com mais de 2 casas decimais, limite fracionado em regra de unidade `count` ou `days`, ou limite acima de 3650 em regra de unidade `days` | Edição da política |
 | QIT001015 | 422 | A mesma regra repetida na edição | Edição da política |
 | QIT001016 | 422 | Política resultante incoerente: reprovação `<=` 2FA, pontos negativos em regra de pontuação, pontos positivos em redutor, faixa de 7 dias `>=` faixa de 30 dias, janela do volume mensal `>=` janela de histórico, teto da relação acima do teto da contraparte, multiplicador do valor muito fora do padrão `<=` o do valor fora do padrão | Edição da política |
 | QIT001017 | 409 | Duas edições simultâneas tentaram criar a mesma versão | Edição da política |
@@ -214,7 +214,7 @@ Peças usadas por mais de um schema, para cada regra de formato existir uma vez 
 
 | Definição | Regra | Por quê |
 |---|---|---|
-| `date_time_with_offset` | `AAAA-MM-DDTHH:MM:SS`, frações opcionais e fuso obrigatório (`Z` ou `+HH:MM`) | Noite e dia são decididos pelo fuso do Pix. Data sem fuso não tem horário local, então não pode ser analisada. O fuso entre -12:00 e +14:00 é conferido no código (422), para não chegar ao banco e virar 500 |
+| `date_time_with_offset` | `AAAA-MM-DDTHH:MM:SS`, frações opcionais e fuso obrigatório (`Z` ou `+HH:MM`) | Noite e dia são decididos pelo fuso do Pix. Data sem fuso não tem horário local, então não pode ser analisada. O fuso entre -12:00 e +14:00 e o ano entre 1900 e 2999 são conferidos no código (422), para não chegar ao banco nem estourar as contas de janela e virar 500 |
 | `amount_cents` | Inteiro de 1 a 1.000.000.000.000 | Dinheiro em centavos, sem ponto flutuante. O teto existe para um valor absurdo virar 400, e não estourar o BIGINT com 500 |
 | `document_number` | CPF com ou sem pontuação, ou CNPJ com ou sem pontuação e com letras maiúsculas nas 12 primeiras posições | O exemplo do desafio vem pontuado. O CNPJ alfanumérico vale para CNPJs novos desde julho de 2026. O dígito verificador é conferido no código (422) |
 | `branch` | 1 a 10 dígitos | Agência é numérica. O limite cabe na coluna |
@@ -255,9 +255,9 @@ O documento vem no caminho e é validado no código: precisa ser um CPF válido 
 
 | Campo | Regra | Por quê |
 |---|---|---|
-| `change_reason` | Obrigatório, até 255, com pelo menos um caractere que não seja espaço | Toda versão precisa dizer por que existe (auditoria e LGPD, art. 20) |
+| `change_reason` | Obrigatório, até 255, com pelo menos um caractere que não seja espaço, e sem byte nulo nem meio caractere (surrogate solto), que o Postgres e o UTF-8 não gravam | Toda versão precisa dizer por que existe (auditoria e LGPD, art. 20) |
 | `based_on_template` | Opcional: `conservative`, `balanced` ou `permissive` | É assim que o banco troca de modelo de partida |
-| `requested_by` | Opcional, até 100, com pelo menos um caractere que não seja espaço | Quem pediu a edição no banco. Basta um identificador interno |
+| `requested_by` | Opcional, até 100, com as mesmas regras de caractere do `change_reason` | Quem pediu a edição no banco. Basta um identificador interno |
 | `risk_acknowledged` | Opcional, booleano. Exige `requested_by` (`dependencies`) | O aceite do risco só vale com alguém responsável por ele |
 | `parameters` | Opcional; só os 22 parâmetros conhecidos, cada um inteiro dentro de uma faixa | Parâmetro desconhecido é 400 porque não existe. As faixas barram valores sem sentido (janela de 0 dias). A coerência entre parâmetros fica no código (422) |
 | `rules` | Opcional; até 50 itens com `code` obrigatório e pelo menos um ajuste (`enabled`, `points` de -100 a 100, `threshold > 0`, `window_minutes >= 1`, `company_threshold > 0`) | Um item só com o código não ajusta nada. Qual ajuste cada regra aceita depende do catálogo e é conferido no código (422) |
