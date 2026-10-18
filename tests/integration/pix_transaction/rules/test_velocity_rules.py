@@ -56,7 +56,7 @@ class TestNewAccountAboveCap:
     def test_split_pix_of_a_new_account_add_up_against_the_cap(self):
         transaction_date = business_hours_today()
         payer = new_account_payer(transaction_date)
-        analyze_expecting(pix_payload(payer, new_company_payee(), transaction_date, 60000), "approved", "primeira parte do valor")
+        analyze(pix_payload(payer, new_company_payee(), transaction_date, 60000), "primeira parte do valor")
 
         analysis = analyze(pix_payload(payer, new_company_payee(), transaction_date + timedelta(minutes=10), 50000))
 

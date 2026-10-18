@@ -111,7 +111,7 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Piso das regras de valor | `amount_rules_floor_cents` | Abaixo dele, as regras da família valor não pontuam (R$ 100) | |
 | Teto de conta nova | `new_account_cap_*` | Maior Pix que uma conta nova faz sem fricção (PF R$ 1.000, PJ R$ 10.000) | Limite regulatório |
 | Teto habitual | `usual_ceiling_amount` | Maior Pix aceito do pagador na janela de histórico. Em início frio, é a base de comparação | Teto de conta nova |
-| Familiaridade | `familiarity` | Quantos Pix aceitos do pagador já usaram aquele IP, local ou canal. Os pontos caem conforme a credibilidade sobe | Dispositivo cadastrado |
+| Familiaridade | `familiarity` | Se aquele IP, local ou canal já apareceu nos Pix aceitos do pagador. Só o que nunca apareceu pontua, e pesa mais quanto maior o histórico do pagador | Dispositivo cadastrado |
 | Local | `location` | Latitude e longitude arredondadas em 2 casas (cerca de 1 km) | |
 
 ## Contraparte

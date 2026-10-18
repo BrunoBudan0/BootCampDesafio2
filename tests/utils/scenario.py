@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 from tests.utils.assertions import rule_codes
-from tests.utils.clock import iso
+from tests.utils.clock import business_hours_today, iso
 from tests.utils.pix_payload import (
     DEFAULT_AMOUNT_CENTS,
     Payee,
@@ -75,6 +75,11 @@ def payer_with_accepted_history(
     payee = payee or new_individual_payee()
     analyses = build_accepted_history(payer, payee, last_transaction_date, count, amount_cents, **pix_overrides)
     return payer, payee, analyses
+
+
+def payer_with_registered_device() -> Payer:
+    payer, _, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=2), 1)
+    return payer
 
 
 def new_account_payer(transaction_date: datetime) -> Payer:

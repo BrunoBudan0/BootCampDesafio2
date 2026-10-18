@@ -4,7 +4,7 @@ import pytest
 
 from tests.utils.assertions import assert_error, assert_rule_fired, assert_rule_not_fired
 from tests.utils.clock import business_hours_today, iso, parse_iso, today_at
-from tests.utils.pix_payload import new_company_payee, new_individual_payee, new_individual_payer, payer_on_another_device, pix_payload
+from tests.utils.pix_payload import new_company_payee, new_individual_payee, new_individual_payer, pix_payload
 from tests.utils.random_generator import RandomGenerator
 from tests.utils.request_generator import RequestGenerator
 from tests.utils.requisition import ClientRequisition
@@ -184,18 +184,18 @@ class TestTwoFactorAndHistory:
         payer, _, payload, _ = two_factor_pix(transaction_date)
         confirm_two_factor(payload["id"], "confirmed", transaction_date + timedelta(minutes=2))
 
-        other_device = analyze(pix_payload(payer_on_another_device(payer), new_company_payee(), transaction_date + timedelta(hours=1), 30000))
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date + timedelta(hours=1), 100000))
 
-        assert_rule_fired(other_device, "unregistered_device_limit_exceeded")
+        assert_rule_not_fired(analysis, "new_destination_above_usual_ceiling")
 
     def test_denied_two_factor_stays_out_of_the_payer_history(self):
         transaction_date = business_hours_today()
         payer, _, payload, _ = two_factor_pix(transaction_date)
         confirm_two_factor(payload["id"], "denied", transaction_date + timedelta(minutes=2))
 
-        other_device = analyze(pix_payload(payer_on_another_device(payer), new_company_payee(), transaction_date + timedelta(hours=1), 30000))
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date + timedelta(hours=1), 100000))
 
-        assert_rule_not_fired(other_device, "unregistered_device_limit_exceeded")
+        assert_rule_fired(analysis, "new_destination_above_usual_ceiling")
 
     def test_confirmed_two_factor_registers_the_device(self):
         transaction_date = business_hours_today()

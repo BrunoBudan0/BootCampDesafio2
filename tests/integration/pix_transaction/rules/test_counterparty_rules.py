@@ -212,7 +212,12 @@ class TestDestinationRejectedForOtherSources:
         payee = new_individual_payee()
         night = today_at(23) - timedelta(days=1)
         for minutes_later in (0, 5):
-            payer, _, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=3), 1, amount_cents=200000)
+            payer, history_payee, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=4), 1)
+            analyze_expecting(
+                pix_payload(payer, history_payee, business_hours_today() - timedelta(days=3), 200000),
+                "approved",
+                "subir o teto habitual do pagador para R$ 2.000",
+            )
             rejected = nightly_rejected_pix(payee, night + timedelta(minutes=minutes_later), payer=payer)
             assert all(hit["family"] != "counterparty" for hit in rejected["metadata"]["rules"]), (
                 "A preparação do cenário falhou: a reprovação pelo limite noturno não devia ter sinal de contraparte"

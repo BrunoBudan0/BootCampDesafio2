@@ -42,21 +42,32 @@ class TestImpossibleTravel:
 
 
 class TestIpUnfamiliar:
-    def test_ip_never_used_in_accepted_pix_adds_full_points(self):
+    def test_ip_never_used_in_accepted_pix_adds_points_weighted_by_the_history(self):
         transaction_date = business_hours_today()
         payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
 
         analysis = analyze(pix_payload(payer, payee, transaction_date, ip=RandomGenerator.generate_ip()))
 
-        assert rule_hit(analysis, "ip_unfamiliar")["points"] == 10
+        assert rule_hit(analysis, "ip_unfamiliar")["points"] == 3
 
-    def test_points_fall_as_the_ip_is_used_in_accepted_pix(self):
+    def test_new_ip_weighs_more_for_a_payer_with_more_history(self):
+        transaction_date = business_hours_today()
+        short_history_payer, short_history_payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 1)
+        long_history_payer, long_history_payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 20)
+
+        short_history = analyze(pix_payload(short_history_payer, short_history_payee, transaction_date, ip=RandomGenerator.generate_ip()))
+        long_history = analyze(pix_payload(long_history_payer, long_history_payee, transaction_date, ip=RandomGenerator.generate_ip()))
+
+        assert rule_hit(short_history, "ip_unfamiliar")["points"] == 1
+        assert rule_hit(long_history, "ip_unfamiliar")["points"] == 8
+
+    def test_ip_already_used_in_accepted_pix_adds_nothing(self):
         transaction_date = business_hours_today()
         payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
 
         analysis = analyze(pix_payload(payer, payee, transaction_date))
 
-        assert rule_hit(analysis, "ip_unfamiliar")["points"] == 6
+        assert_rule_not_fired(analysis, "ip_unfamiliar")
 
     def test_payer_without_accepted_pix_is_not_judged_by_ip(self):
         analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today()))
@@ -65,13 +76,13 @@ class TestIpUnfamiliar:
 
 
 class TestLocationUnfamiliar:
-    def test_location_never_used_in_accepted_pix_adds_full_points(self):
+    def test_location_never_used_in_accepted_pix_adds_points_weighted_by_the_history(self):
         transaction_date = business_hours_today()
         payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3, location=SAO_PAULO_LOCATION)
 
         analysis = analyze(pix_payload(payer, payee, transaction_date, location=RIO_DE_JANEIRO_LOCATION))
 
-        assert rule_hit(analysis, "location_unfamiliar")["points"] == 10
+        assert rule_hit(analysis, "location_unfamiliar")["points"] == 3
 
     def test_location_is_compared_rounded_to_two_decimal_places(self):
         transaction_date = business_hours_today()
@@ -79,7 +90,7 @@ class TestLocationUnfamiliar:
 
         analysis = analyze(pix_payload(payer, payee, transaction_date, location=SAO_PAULO_NEARBY_LOCATION))
 
-        assert rule_hit(analysis, "location_unfamiliar")["points"] == 6
+        assert_rule_not_fired(analysis, "location_unfamiliar")
 
     def test_pix_without_geolocation_is_not_judged_by_location(self):
         transaction_date = business_hours_today()
@@ -91,21 +102,21 @@ class TestLocationUnfamiliar:
 
 
 class TestChannelUnfamiliar:
-    def test_channel_never_used_in_accepted_pix_adds_full_points(self):
+    def test_channel_never_used_in_accepted_pix_adds_points_weighted_by_the_history(self):
         transaction_date = business_hours_today()
         payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
 
         analysis = analyze(pix_payload(payer, payee, transaction_date, channel="web"))
 
-        assert rule_hit(analysis, "channel_unfamiliar")["points"] == 15
+        assert rule_hit(analysis, "channel_unfamiliar")["points"] == 5
 
-    def test_points_fall_as_the_channel_is_used_in_accepted_pix(self):
+    def test_channel_already_used_in_accepted_pix_adds_nothing(self):
         transaction_date = business_hours_today()
         payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
 
         analysis = analyze(pix_payload(payer, payee, transaction_date))
 
-        assert rule_hit(analysis, "channel_unfamiliar")["points"] == 9
+        assert_rule_not_fired(analysis, "channel_unfamiliar")
 
     def test_channel_is_compared_without_case(self):
         transaction_date = business_hours_today()
@@ -113,7 +124,7 @@ class TestChannelUnfamiliar:
 
         analysis = analyze(pix_payload(payer, payee, transaction_date, channel="APP"))
 
-        assert rule_hit(analysis, "channel_unfamiliar")["points"] == 9
+        assert_rule_not_fired(analysis, "channel_unfamiliar")
 
 
 class TestTwoFactorDeniedRecently:

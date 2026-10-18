@@ -2,7 +2,7 @@
 
 Os termos seguem a [linguagem onipresente](linguagem-onipresente.md) e as tabelas seguem a [modelagem de dados](modelagem-de-dados.md). Este documento fecha o que os testes exigem: como cada regra é calculada, o formato de cada resposta, os códigos de erro e o porquê de cada schema.
 
-O projeto segue TDD: os testes foram escritos antes do código. Hoje a suíte tem 295 testes. Com as rotas ainda inexistentes, 287 falham com HTTP 404 e 8 passam: os 6 de health check do template e 2 de token ausente, porque o middleware de INTERNAL-TOKEN do Base Service já recusa qualquer rota sem token. Os testes que editam a política também dão erro no fim, porque a restauração da política confere o 201 e a rota ainda não existe.
+O projeto segue TDD: os testes foram escritos antes do código. Hoje a suíte tem 297 testes. Com as rotas ainda inexistentes, 289 falham com HTTP 404 e 8 passam: os 6 de health check do template e 2 de token ausente, porque o middleware de INTERNAL-TOKEN do Base Service já recusa qualquer rota sem token. Os testes que editam a política também dão erro no fim, porque a restauração da política confere o 201 e a rota ainda não existe.
 
 ## 1. Como rodar
 
@@ -51,7 +51,7 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | Mediana da população | `(N × mediana observada + 30 × ticket médio de referência) / (N + 30)`, com N = Pix aceitos de todos os pagadores com o mesmo par pagador e recebedor na janela de histórico. Com N = 0, vale o ticket médio de referência |
 | Base de comparação | `(n × mediana do pagador + 5 × mediana da população) / (n + 5)`, com n = Pix aceitos do pagador no mesmo par. Com n = 0, vale a mediana da população |
 | Teto habitual | Maior Pix aceito do pagador no histórico, de qualquer par. Em início frio, a base de comparação |
-| Pontos com familiaridade | `piso(pontos × k / (k + n))`, com n = Pix aceitos do pagador com aquele IP, local ou canal. A regra só é gravada quando o resultado é maior que zero. Com 10 pontos e k = 5: n = 0 dá 10, n = 3 dá 6 |
+| Pontos com familiaridade | Só pontua IP, local ou canal que nunca apareceu nos Pix aceitos do pagador no histórico. Os pontos são `piso(pontos × N / (N + k))`, com N = Pix aceitos do pagador no histórico: quanto mais histórico, mais estranho é um valor novo. A regra só é gravada quando o resultado é maior que zero. Com 10 pontos e k = 5: N = 1 dá 1, N = 3 dá 3, N = 20 dá 8. IP, local ou canal já usado não pontua |
 | Local | Latitude e longitude arredondadas em 2 casas, com arredondamento do Postgres (metade para longe do zero) |
 | Distância | Fórmula de haversine com raio da Terra de 6.371 km, sobre as coordenadas como vieram |
 | Velocidade | Distância dividida pelo tempo entre o Pix analisado e a tentativa anterior mais recente do pagador que tinha geolocalização. Tempo zero com distância maior que zero conta como velocidade infinita |
@@ -67,9 +67,9 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | `impossible_travel_on_unregistered_device` | Velocidade `> 900 km/h` e o aparelho não está cadastrado para o pagador |
 | `new_account_to_new_destination_far_above_cap` | Conta nova, destino novo e valor acumulado no recebedor `> 5 ×` teto de conta nova |
 | `nightly_limit_exceeded` | Pagador e recebedor PF, Pix à noite e a soma da noite (valor do Pix mais o consumo de limite PF para PF desde o início da noite) `>` limite noturno do pagador. Vale também em início frio. O limite em vigor em `T` sai do pedido mais recente com `requested_at <= T`: se ele já vale (`effective_at <= T`), é o valor dele; se ainda não vale (aumento pendente), é o limite em vigor imediatamente antes desse pedido. Sem pedido, R$ 1.000. Assim uma redução nunca é desfeita por um aumento pedido antes dela |
-| `unregistered_device_limit_exceeded` | Fora do início frio, aparelho não cadastrado e (valor do Pix `> R$ 200` ou soma do dia no mesmo aparelho `> R$ 1.000`) |
+| `unregistered_device_limit_exceeded` | Aparelho não cadastrado e (valor do Pix `> R$ 200` ou soma do dia no mesmo aparelho `> R$ 1.000`). Vale também em início frio: o motor não recebe o cadastro de aparelhos do banco, então todo aparelho é tratado como novo até o motor cadastrá-lo |
 | `impossible_travel` | Velocidade `> 900 km/h` com o aparelho cadastrado |
-| `ip_unfamiliar`, `location_unfamiliar`, `channel_unfamiliar` | Fora do início frio, com pontos de familiaridade maiores que zero. O local só é avaliado se o Pix trouxer geolocalização. O canal é comparado em minúsculas |
+| `ip_unfamiliar`, `location_unfamiliar`, `channel_unfamiliar` | Fora do início frio, valor nunca usado nos Pix aceitos do pagador e pontos de familiaridade maiores que zero. O local só é avaliado se o Pix trouxer geolocalização. O canal é comparado em minúsculas |
 | `two_factor_denied_recently` | Alguma confirmação `denied` de análise do pagador com `confirmed_at` em `(T menos 24 h, T]` |
 | `new_account_above_cap` | Conta nova e valor acumulado no total `>` teto de conta nova (PF R$ 1.000, PJ R$ 10.000) |
 | `burst_of_pix` | Tentativas do pagador em `(T menos 5 min, T]`, contando a atual, `>= 5` |
@@ -89,7 +89,7 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 
 | Origem | Quando |
 |---|---|
-| `first_seen` | A análise é aprovada direto e o pagador não tem nenhum Pix aceito antes, em qualquer data |
+| `first_seen` | A análise é aprovada direto e o pagador não tem nenhum Pix aceito antes, em qualquer data. Como o limite do aparelho vale no início frio, isso só acontece num primeiro Pix de até R$ 200 (e até R$ 1.000 no dia); acima disso o primeiro Pix pede 2FA e o aparelho nasce `two_factor` |
 | `two_factor` | Uma confirmação `confirmed` chega para uma análise. O aparelho daquela análise é cadastrado se ainda não estiver |
 
 ### Decisão
@@ -309,8 +309,8 @@ Essas conferências não entram na suíte, porque a regra do projeto é testar s
 | `test_pix_transaction_get.py` | 7 | GET igual ao POST; 404 com QIT001001; token; nenhum documento exposto; 2FA pendente e expirado pelo relógio; Pix aprovado sem `two_factor` |
 | `test_pix_decision_flow.py` | 22 | Pix sem sinal aprova com zero; teto de família; risco do recebedor sem teto; redutores; pontuação nunca negativa; faixas 40 e 70; regulatória de 2FA vence pontuação baixa; limite noturno reprova e mantém a pontuação; eliminatória encerra sem pontuação; validade de 10 minutos; versão da política na análise; formato de cada regra disparada; alerta a partir de 30 e conta de destino muito recente sozinha sem alerta; redutores não abatem sinais da base; destino conhecido abate sinais da relação; eliminatória esconde a regulatória; Pix simultâneos do mesmo pagador, do mesmo aparelho e para o mesmo recebedor se enxergam (travas) |
 | `rules/test_eliminatory_rules.py` | 12 | Aparelho compartilhado (5 pagadores, janela de 24 h, mesmo pagador conta uma vez); viagem impossível em aparelho não cadastrado; conta nova para destino novo acima de 5 vezes o teto, com fronteira e fracionamento |
-| `rules/test_regulatory_rules.py` | 25 | Limite noturno: fronteira de R$ 1.000, fracionamento, virada da meia-noite, uma noite por vez, 20h e 6h, só PF para PF, fuso do payload, reprovado não consome limite, 2FA pendente consome e expirado não, paralelo não passa os dois, aumento aprovado só depois de 24 h, redução imediata, redução depois de um aumento pendente mantém o limite menor. Aparelho não cadastrado: R$ 200 por Pix, R$ 1.000 por dia, virada do dia local, início frio, cadastro pelo primeiro Pix aceito e pelo 2FA confirmado, 2FA recusado não cadastra |
-| `rules/test_identity_rules.py` | 14 | Viagem impossível com 40 pontos e sem geolocalização; IP, local e canal com pontos que caem conforme o uso; local arredondado; canal sem diferença de maiúsculas; 2FA recusado nas últimas 24 h |
+| `rules/test_regulatory_rules.py` | 26 | Limite noturno: fronteira de R$ 1.000, fracionamento, virada da meia-noite, uma noite por vez, 20h e 6h, só PF para PF, fuso do payload, reprovado não consome limite, 2FA pendente consome e expirado não, paralelo não passa os dois, aumento aprovado só depois de 24 h, redução imediata, redução depois de um aumento pendente mantém o limite menor. Aparelho não cadastrado: R$ 200 por Pix, R$ 1.000 por dia, virada do dia local, também no início frio, cadastro pelo primeiro Pix aceito e pelo 2FA confirmado, 2FA recusado não cadastra |
+| `rules/test_identity_rules.py` | 15 | Viagem impossível com 40 pontos e sem geolocalização; IP, local e canal só pontuam quando nunca foram usados, com peso que cresce com o histórico; local arredondado; canal sem diferença de maiúsculas; 2FA recusado nas últimas 24 h |
 | `rules/test_velocity_rules.py` | 12 | Conta nova acima do teto para PF e PJ, com fronteiras de valor e de 30 dias; fracionamento; 2FA pendente consome o teto, recusado e expirado não; rajada com fronteira de 5 minutos e contando tentativas reprovadas |
 | `rules/test_amount_rules.py` | 8 | Valor fora do padrão, dentro do padrão, início frio e fracionamento para o mesmo recebedor; volume mensal acima e dentro do típico, histórico curto e início frio |
 | `rules/test_counterparty_rules.py` | 26 | Idade da conta de destino com as fronteiras de 7 e 30 dias; destino novo acima do teto habitual, fronteira, destino conhecido, fracionamento e início frio; fan-in só para PF, só a partir do piso e janela de 1 h; reprovações de outros pagadores (2FA recusado e reprovação com sinal de contraparte contam, reprovação só por sinal do pagador não, as do próprio pagador não, 7 dias, sem se realimentar); mesmo documento em várias contas, PF e PJ, janela de 24 h |

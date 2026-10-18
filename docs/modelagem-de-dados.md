@@ -246,7 +246,8 @@ Análises com decisão `approved`, mais as com decisão `two_factor_required` e 
 Regras de convivência:
 - As duas regras de conta de destino recente são exclusivas: dispara só a mais grave.
 - A mediana do pagador e a mediana da população são calculadas pelo par pagador → recebedor do Pix analisado. O início frio continua sendo do pagador inteiro; um par sem histórico só pesa mais o ticket médio de referência.
-- Em início frio não pontuam: familiaridade de IP, local e canal, e a família valor (valor fora do padrão e volume mensal). O limite do dispositivo não cadastrado também não dispara.
+- Em início frio não pontuam: familiaridade de IP, local e canal, e a família valor (valor fora do padrão e volume mensal). O limite do dispositivo não cadastrado vale também no início frio: o primeiro Pix acima de R$ 200 pede 2FA, e o 2FA confirmado cadastra o aparelho.
+- Familiaridade só pontua IP, local ou canal nunca vistos nos Pix aceitos do pagador, com peso que cresce com o histórico: `piso(pontos × N / (N + k))`, N = Pix aceitos do pagador. O que já foi usado não pontua, para o histórico só tirar fricção.
 - Se o primeiro Pix aceito do pagador veio por 2FA confirmado, a origem do cadastro do dispositivo é `two_factor`.
 - `destination_account_opened_very_recently` vale 25, abaixo do limiar de alerta: conta de destino nova sozinha não gera alerta, mas gera com qualquer outro sinal.
 - `destination_rejected_for_other_sources` só soma risco e nunca reprova sozinha. Conta os 2FA recusados e os Pix reprovados em que disparou alguma regra de contraparte ou `new_account_to_new_destination_far_above_cap`. Reprovação por motivo só do pagador (limite noturno, dispositivo compartilhado, viagem impossível) não diz nada sobre o recebedor e fica de fora. Ignora as análises em que ela mesma disparou, para não se realimentar.
@@ -307,4 +308,4 @@ Regras de convivência:
 ## Em aberto
 
 - Pontos das regras marcadas "a definir".
-- Decisões de produto levantadas pela revisão de 17/10 e ainda sem resposta: familiaridade (pontuar só valor nunca visto), limite da Res. 403 no início frio, premissa de confiança nas datas, meta de latência e política de falha. Ver o resumo no contexto do time.
+- Para o README: premissa de confiança nas datas (quem chama é o backend do banco), meta de latência e o que fazer se o motor não responder.
