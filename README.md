@@ -140,14 +140,12 @@ As três primeiras são **sinais da relação**: dependem do que este pagador sa
 1. **Regras eliminatórias.** Se alguma dispara, a análise é `rejected` na hora e grava só as eliminatórias; a pontuação fica nula.
 2. **Pontuação de risco.** Cada família é limitada ao seu teto e perde os redutores que a desmentem, sem ficar abaixo de zero:
 
-   ```
    identidade     = min(identidade, 50) - aparelho cadastrado
    relação        = min(sinais da relação, 30) - destino conhecido - mesma titularidade
    valor          = min(valor, 35) - mesma titularidade
    comportamento  = min(tempo + valor + relação, 65)
    contraparte    = min(relação + sinais da base, 70)
    pontuação      = identidade + comportamento + (contraparte - relação)
-   ```
 
    Abaixo de 40 aprova, de 40 a 69 pede 2FA, a partir de 70 reprova.
 3. **Regras regulatórias.** O limite noturno estourado reprova; o limite do aparelho não cadastrado pede no mínimo 2FA. Vale a decisão mais severa entre elas e a faixa da pontuação: `rejected` > `two_factor_required` > `approved`.
