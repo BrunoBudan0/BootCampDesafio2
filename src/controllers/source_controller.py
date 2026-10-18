@@ -5,6 +5,7 @@ from errors import InvalidDocumentNumber, NightlyLimitOnlyForIndividuals
 from models import SourceNightlyLimit
 from repositories import AdvisoryLockRepository, SourceRepository, source_lock_name
 from utils.document_number import is_valid_document_number, normalized_document_number, person_type_of
+from utils.money import brazilian_reais
 
 
 class SourceController(BaseController):
@@ -36,4 +37,11 @@ class SourceController(BaseController):
         response = source_nightly_limit_response(nightly_limit)
         self.session.commit()
 
+        self.logger.info(
+            f"LIMITE NOTURNO PEDIDO: {brazilian_reais(nightly_limit.nightly_limit_cents)}, vale a partir de {response['effective_at']}",
+            extra={
+                "event": "nightly_limit_requested",
+                "details": {"nightly_limit_cents": nightly_limit.nightly_limit_cents, "effective_at": response["effective_at"]},
+            },
+        )
         return response

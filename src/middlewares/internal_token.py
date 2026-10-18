@@ -5,6 +5,10 @@ from fastapi import FastAPI, Request
 from constants import BYPASS_ENDPOINTS, INTERNAL_TOKEN
 from errors.base_error import ForbiddenNotInternal
 from errors.handlers import qi_exception_to_response
+from utils.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 def register_internal_token_middleware(application: FastAPI) -> None:
@@ -28,6 +32,11 @@ def register_internal_token_middleware(application: FastAPI) -> None:
 
         received_token = request.headers.get("INTERNAL-TOKEN", "")
         if not hmac.compare_digest(received_token.encode(), INTERNAL_TOKEN.encode()):
-            return qi_exception_to_response(ForbiddenNotInternal())
+            refusal = ForbiddenNotInternal()
+            logger.warning(
+                f"ACESSO NEGADO: INTERNAL-TOKEN ausente ou errado ({refusal.code})",
+                extra={"event": "access_denied", "persist": True, "http_status": refusal.http_status, "error_code": refusal.code},
+            )
+            return qi_exception_to_response(refusal)
 
         return await call_next(request)

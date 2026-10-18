@@ -2,7 +2,8 @@ import logging
 import sys
 
 from constants import APP_ENV, SERVICE_NAME
-from utils.request_context import get_request_id
+from utils.database_log_handler import DatabaseLogHandler
+from utils.request_context import get_request_id, get_request_route
 
 
 # O "[%(request_id)s]" é o identificador da requisição que gerou a linha
@@ -31,6 +32,11 @@ class RequestIdFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = get_request_id()
+        http_method, http_path = get_request_route()
+        if not hasattr(record, "http_method"):
+            record.http_method = http_method
+        if not hasattr(record, "http_path"):
+            record.http_path = http_path
         return True
 
 
@@ -49,9 +55,12 @@ def setup_logging() -> None:
     # linha vinda de outro lugar derrubaria a formatação.
     handler.addFilter(RequestIdFilter())
 
+    database_handler = DatabaseLogHandler()
+    database_handler.addFilter(RequestIdFilter())
+
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
-    root_logger.handlers = [handler]
+    root_logger.handlers = [handler, database_handler]
 
     # O urllib3 fala MUITO em modo debug, e nada disso e nosso: sao
     # detalhes de conexao HTTP das bibliotecas que usamos.

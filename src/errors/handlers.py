@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -11,6 +13,7 @@ from errors.base_error import (
     MethodNotAllowed,
     NotFoundResource,
 )
+from utils.log_text import loggable_path, loggable_text
 from utils.logger import get_logger
 
 
@@ -32,6 +35,21 @@ def qi_exception_to_response(exception: QIException) -> JSONResponse:
     return JSONResponse(status_code=exception.http_status, content=body)
 
 
+def refusal_response(exception: QIException) -> JSONResponse:
+    log_level = logging.ERROR if exception.http_status >= 500 else logging.WARNING
+    logger.log(
+        log_level,
+        f"RECUSA {exception.code} {exception.http_status}: {loggable_text(exception.description)}",
+        extra={
+            "event": "request_refused",
+            "persist": getattr(exception, "recorded_in_system_log", False),
+            "http_status": exception.http_status,
+            "error_code": exception.code,
+        },
+    )
+    return qi_exception_to_response(exception)
+
+
 def describe_validation_error(error: dict) -> str:
     location = []
     for part in error.get("loc", []):
@@ -51,20 +69,23 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(QIException)
     def handle_qi_exception(request: Request, exception: QIException) -> JSONResponse:
-        return qi_exception_to_response(exception)
+        return refusal_response(exception)
 
     @application.exception_handler(StarletteHTTPException)
     def handle_http_exception(request: Request, exception: StarletteHTTPException) -> JSONResponse:
         if exception.status_code == 404:
-            return qi_exception_to_response(NotFoundResource())
+            return refusal_response(NotFoundResource())
 
         if exception.status_code == 405:
-            return qi_exception_to_response(MethodNotAllowed())
+            return refusal_response(MethodNotAllowed())
 
         if exception.status_code == 400:
-            return qi_exception_to_response(InvalidSchema(str(exception.detail)))
+            return refusal_response(InvalidSchema(str(exception.detail)))
 
-        logger.error(f"HTTP {exception.status_code} em {request.url.path}: {exception.detail}")
+        logger.error(
+            f"HTTP {exception.status_code} em {loggable_path(request.url.path)}: {loggable_text(str(exception.detail))}",
+            extra={"event": "unexpected_error", "http_status": InternalError().http_status, "error_code": InternalError.code},
+        )
         return qi_exception_to_response(InternalError())
 
     @application.exception_handler(RequestValidationError)
@@ -94,11 +115,15 @@ def register_error_handlers(application: FastAPI) -> None:
         # para isso. O QIT000010 que o cliente ve hoje vem de outro
         # lugar: do controller, quando birthdate_from > birthdate_to.
         if origin in ("query", "path"):
-            return qi_exception_to_response(InvalidParameter(description))
+            return refusal_response(InvalidParameter(description))
 
-        return qi_exception_to_response(InvalidSchema(description))
+        return refusal_response(InvalidSchema(description))
 
     @application.exception_handler(Exception)
     def handle_unexpected_error(request: Request, exception: Exception) -> JSONResponse:
-        logger.exception(f"Erro inesperado em {request.method} {request.url.path}")
+        logger.error(
+            f"Erro inesperado em {request.method} {loggable_path(request.url.path)}",
+            exc_info=exception,
+            extra={"event": "unexpected_error", "http_status": InternalError().http_status, "error_code": InternalError.code},
+        )
         return qi_exception_to_response(InternalError())

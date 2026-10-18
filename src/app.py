@@ -9,7 +9,7 @@ from middlewares import (
     register_request_logger_middleware,
     register_session_manager_middleware,
 )
-from resources import HealthCheckResource, PixTransactionResource, RiskPolicyResource, SourceResource
+from resources import HealthCheckResource, PixTransactionResource, RiskPolicyResource, SourceResource, SystemLogResource
 from utils.logger import setup_logging
 
 
@@ -156,6 +156,10 @@ def create_app() -> FastAPI:
         source_resource.on_post_nightly_limit,
         methods=["POST"],
     )
+
+    system_log_resource = SystemLogResource()
+
+    application.add_api_route("/system-logs", system_log_resource.on_get, methods=["GET"])
 
     register_error_handlers(application)
 

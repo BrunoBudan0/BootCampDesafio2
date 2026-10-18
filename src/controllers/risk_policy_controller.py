@@ -21,6 +21,7 @@ from errors import (
 )
 from models import Rule, RiskPolicy, RiskPolicyGuardrail, RiskPolicyRuleSetting, RiskPolicyVersion
 from repositories import RiskPolicyGuardrailRepository, RiskPolicyRepository, RuleRepository
+from utils.log_text import loggable_text
 from utils.money import brazilian_decimal
 
 
@@ -95,7 +96,26 @@ class RiskPolicyController(BaseController):
                 raise ConcurrentRiskPolicyEdit()
             raise
 
+        self.log_new_version(response)
         return response
+
+    def log_new_version(self, response: dict) -> None:
+        based_on = response["based_on"]
+        self.logger.info(
+            f"POLÍTICA ALTERADA: versão {response['version']} baseada em {based_on['name']} v{based_on['version']}, "
+            f"pedida por {loggable_text(response['requested_by'] or 'não informado')}, aceite do risco: {'sim' if response['risk_acknowledged'] else 'não'}",
+            extra={
+                "event": "policy_version_created",
+                "persist": True,
+                "details": {
+                    "version": response["version"],
+                    "based_on": based_on,
+                    "change_reason": response["change_reason"],
+                    "requested_by": response["requested_by"],
+                    "risk_acknowledged": response["risk_acknowledged"],
+                },
+            },
+        )
 
     def ensure_within_guardrails(self, version: RiskPolicyVersion, rules_by_name: dict, risk_acknowledged: bool) -> None:
         reference_version = self.risk_policy_repository.find_current_version(REFERENCE_POLICY_NAME)

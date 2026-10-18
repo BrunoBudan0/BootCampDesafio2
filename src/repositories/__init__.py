@@ -4,3 +4,4 @@ from repositories.risk_policy_guardrail_repository import RiskPolicyGuardrailRep
 from repositories.pix_analysis_repository import PixAnalysisRepository
 from repositories.source_repository import SourceRepository
 from repositories.advisory_lock_repository import AdvisoryLockRepository, source_lock_name
+from repositories.system_log_repository import SystemLogRepository, add_system_log_in_its_own_transaction

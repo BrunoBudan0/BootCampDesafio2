@@ -181,6 +181,7 @@ class TwoFactorOutsideValidity(QIException):
 
 class OutsideSafetyRange(QIException):
     code = "QIT001018"
+    recorded_in_system_log = True
 
     def __init__(self, description: str, translation: str) -> None:
         title = "Outside Safety Range"
@@ -190,6 +191,7 @@ class OutsideSafetyRange(QIException):
 
 class AnchorCaseNoLongerCaught(QIException):
     code = "QIT001019"
+    recorded_in_system_log = True
 
     def __init__(self, missed_anchor_cases: list) -> None:
         title = "Anchor Case No Longer Caught"
@@ -205,6 +207,7 @@ class AnchorCaseNoLongerCaught(QIException):
 
 class RiskNotAcknowledged(QIException):
     code = "QIT001020"
+    recorded_in_system_log = True
 
     def __init__(self, loosened_settings: list) -> None:
         title = "Risk Not Acknowledged"

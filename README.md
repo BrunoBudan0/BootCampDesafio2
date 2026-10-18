@@ -221,6 +221,7 @@ Esse desenho segue o sigilo bancário (LC 105/2001) e a LGPD: o banco é o contr
 | `GET /risk-policy/templates` | Os três modelos de política |
 | `GET /risk-policy/guardrails` | A política de referência, as faixas de segurança e os casos-âncora |
 | `POST /risk-policy/versions` | Cria uma versão nova da política: só o que vier no corpo muda, o resto é herdado. Afrouxar exige o aceite do risco |
+| `GET /system-logs` | Os eventos críticos gravados no banco, com filtro por nível, evento, `request_id` e data |
 
 ### Códigos de erro
 
@@ -256,7 +257,62 @@ Todo erro sai com código QIT e corpo `{title, description, translation, code}`.
 
 **Por que 400 e 422 são diferentes:** 400 quer dizer "não consegui ler o pedido", e é o schema que decide. 422 quer dizer "li, entendi, e o valor não pode existir": um CPF com o formato certo e o dígito errado, ou uma data que passa no padrão e não existe no calendário. É a mesma separação do Base Service (`InvalidDocumentNumber` e `InvalidBirthdate`).
 
-**Por que pedido recusado não é gravado:** um pedido que não passa no schema ou na validação não é um Pix. Os testes de recusa do Pix e do 2FA conferem pelo GET que nada ficou gravado, e os da política conferem que nenhuma versão nova foi criada.
+**Por que pedido recusado não é gravado:** um pedido que não passa no schema ou na validação não é um Pix. Os testes de recusa do Pix e do 2FA conferem pelo GET que nada ficou gravado, e os da política conferem que nenhuma versão nova foi criada. O que pode ficar de uma recusa é o registro no `system_log`, quando ela é de segurança.
+
+## Log e observabilidade
+
+Toda requisição ganha um `request_id`, que volta no header `X-Request-ID` da resposta. Se quem chama manda um `X-Request-ID` válido, ele é reaproveitado. Toda linha de log daquela requisição sai com esse id, então `docker compose logs api | grep <request_id>` mostra a história inteira de um pedido.
+
+### O que o log escreve
+
+| Nível | Evento | Quando | O que traz |
+|---|---|---|---|
+| INFO | `request_received`, `response_sent` | Toda requisição, menos `/` e `/health_check` | Método, rota, status e tempo em ms |
+| INFO | `pix_analyzed` | Análise nova | `id` do Pix, decisão, risco, risco do recebedor, alerta, regras que dispararam e versão da política |
+| INFO | `pix_replayed` | O mesmo Pix enviado de novo | `id` do Pix |
+| INFO | `two_factor_answered`, `two_factor_replayed` | Resposta do 2FA | `id` do Pix, resultado e se o aparelho foi cadastrado |
+| INFO | `nightly_limit_requested` | Pedido de limite noturno | Valor e quando passa a valer |
+| INFO | `policy_version_created` | Versão nova da política | Versão, base, motivo, quem pediu e aceite do risco |
+| WARNING | `request_refused` | Toda recusa 4xx | Código QIT, status e descrição |
+| WARNING | `access_denied` | `INTERNAL-TOKEN` ausente ou errado | Rota e QIT000002. O token recebido nunca é escrito |
+| ERROR | `unexpected_error` | Todo 500 | Rota, QIT000500 e o traceback |
+
+Nenhuma linha traz CPF, CNPJ, conta ou o corpo da requisição. O documento na rota do limite noturno sai como `/sources/***/nightly-limit`. Caracteres de controle viram `?`, para ninguém conseguir escrever uma linha falsa no log.
+
+### O que é crítico vai para o banco
+
+O container é descartável: o que fica só na saída do processo some junto com ele. Por isso os eventos críticos também são gravados na tabela `system_log`, que aceita apenas INSERT como as outras:
+
+- todo log de nível ERROR ou acima, com o traceback (todo 500 cai aqui);
+- `policy_version_created`: quem mudou a política e por quê;
+- `access_denied`: chamada sem o token certo;
+- as recusas de segurança da política: QIT001018, QIT001019 e QIT001020.
+
+O Pix analisado não vai para o `system_log`: a análise, as regras e os motivos já ficam em `pix_analysis` e `pix_analysis_rule_hit`.
+
+A gravação usa uma conexão própria, fora da transação da requisição. Num 500 a requisição é desfeita, e o registro do erro fica. Com o banco fora do ar, a API responde do mesmo jeito e avisa no stderr que o registro não foi gravado.
+
+### `GET /system-logs`
+
+Exige `INTERNAL-TOKEN` e devolve `{"logs": [...]}`, do mais novo para o mais antigo. Cada registro traz `created_at`, `level`, `event`, `request_id`, `message`, `http_method`, `path`, `http_status`, `error_code`, `details` e `stack_trace`.
+
+| Filtro | Formato |
+|---|---|
+| `level` | `DEBUG`, `INFO`, `WARNING`, `ERROR` ou `CRITICAL` |
+| `event` | Nome do evento, como `access_denied` |
+| `request_id` | O `X-Request-ID` da requisição |
+| `since` | Data com fuso. O `+` do fuso vai como `%2B` na URL |
+| `limit` | De 1 a 200. O padrão é 50 |
+
+Filtro inválido devolve 400 QIT000001, e data impossível em `since` devolve 422 QIT001004.
+
+### Alarmes
+
+Métricas e alarmes ficam na infraestrutura, fora do repositório. A tabela deixa as regras simples de montar:
+
+- algum `unexpected_error` nos últimos 5 minutos: alguém abre o `stack_trace` pelo `request_id`;
+- muitos `access_denied` seguidos: alguém tentando adivinhar o token;
+- `policy_version_created` com aceite do risco: o time de risco revisa a mudança.
 
 ## Como rodar e testar
 
@@ -284,7 +340,7 @@ Rodar os testes, com a API de pé:
 pytest
 ```
 
-São 349 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
+São 368 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
 
 A API atende em `http://localhost:3000`. Toda rota, menos `/` e `/health_check`, exige o header `INTERNAL-TOKEN` (o padrão é `default_token`).
 
@@ -306,6 +362,18 @@ Ver a política vigente:
 
 ```bash
 curl http://localhost:3000/risk-policy -H "INTERNAL-TOKEN: default_token"
+```
+
+Seguir uma requisição no log, pelo `X-Request-ID` que voltou na resposta:
+
+```bash
+docker compose logs api | grep <request_id>
+```
+
+Ver os erros gravados no banco:
+
+```bash
+curl "http://localhost:3000/system-logs?level=ERROR" -H "INTERNAL-TOKEN: default_token"
 ```
 
 O banco só lê o `database/database.sql` quando nasce. Depois de mudar esse arquivo:

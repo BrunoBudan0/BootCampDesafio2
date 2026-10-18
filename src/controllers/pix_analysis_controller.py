@@ -118,6 +118,7 @@ class PixAnalysisController(BaseController):
                 raise
             return self.replayed_analysis(recorded_analysis, pix.payload_hash)
 
+        self.log_new_analysis(pix.pix_id, outcome, policy_version)
         return CREATED_STATUS_CODE, self.recorded_analysis_response(pix.pix_id)
 
     def get_analysis(self, pix_id: str) -> dict:
@@ -146,7 +147,8 @@ class PixAnalysisController(BaseController):
             )
 
             device_is_unregistered = self.source_repository.find_registered_device(analysis.source_document_number, analysis.source_device_id) is None
-            if payload["result"] == "confirmed" and device_is_unregistered:
+            registers_device = payload["result"] == "confirmed" and device_is_unregistered
+            if registers_device:
                 self.source_repository.add_registered_device(
                     RegisteredDevice(
                         source_document_number=analysis.source_document_number,
@@ -165,18 +167,52 @@ class PixAnalysisController(BaseController):
                 raise
             return self.replayed_two_factor_result(pix_id, recorded_confirmation.result, payload["result"])
 
+        self.logger.info(
+            f"2FA RESPONDIDO {pix_id}: {payload['result']}" + (", aparelho cadastrado" if registers_device else ""),
+            extra={"event": "two_factor_answered", "details": {"pix_id": pix_id, "result": payload["result"], "device_registered": registers_device}},
+        )
         return CREATED_STATUS_CODE, self.recorded_analysis_response(pix_id)
+
+    def log_new_analysis(self, pix_id: str, outcome, policy_version) -> None:
+        rule_names = [rule_hit.rule_name for rule_hit in outcome.rule_hits]
+        raises_alert = (
+            outcome.destination_risk_score is not None and outcome.destination_risk_score >= policy_version.destination_risk_alert_threshold
+        )
+        self.logger.info(
+            f"PIX ANALISADO {pix_id}: {outcome.decision}, risco {outcome.risk_score}, risco do recebedor {outcome.destination_risk_score}, "
+            f"alerta {'sim' if raises_alert else 'não'}, regras {', '.join(rule_names) or 'nenhuma'}",
+            extra={
+                "event": "pix_analyzed",
+                "details": {
+                    "pix_id": pix_id,
+                    "decision": outcome.decision,
+                    "risk_score": outcome.risk_score,
+                    "destination_risk_score": outcome.destination_risk_score,
+                    "alert": raises_alert,
+                    "rules": rule_names,
+                    "policy": {"name": policy_version.risk_policy.name, "version": policy_version.version_number},
+                },
+            },
+        )
 
     def replayed_analysis(self, recorded_analysis: PixAnalysis, payload_hash: str) -> tuple:
         if recorded_analysis.payload_hash != payload_hash:
             raise PixIdUsedWithOtherContent(recorded_analysis.pix_id)
 
+        self.logger.info(
+            f"PIX REPETIDO {recorded_analysis.pix_id}: devolve a análise já gravada",
+            extra={"event": "pix_replayed", "details": {"pix_id": recorded_analysis.pix_id}},
+        )
         return REPLAYED_STATUS_CODE, pix_analysis_response(recorded_analysis, datetime.now(timezone.utc))
 
     def replayed_two_factor_result(self, pix_id: str, recorded_result: str, sent_result: str) -> tuple:
         if recorded_result != sent_result:
             raise TwoFactorAlreadyAnswered(pix_id, recorded_result)
 
+        self.logger.info(
+            f"2FA REPETIDO {pix_id}: devolve a resposta já gravada",
+            extra={"event": "two_factor_replayed", "details": {"pix_id": pix_id, "result": recorded_result}},
+        )
         return REPLAYED_STATUS_CODE, self.recorded_analysis_response(pix_id)
 
     def analysis_or_not_found(self, pix_id: str) -> PixAnalysis:

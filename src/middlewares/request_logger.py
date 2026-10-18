@@ -3,6 +3,7 @@ import time
 from fastapi import FastAPI, Request
 
 from constants import BYPASS_ENDPOINTS
+from utils.log_text import loggable_path, loggable_text
 from utils.logger import get_logger
 
 
@@ -45,16 +46,20 @@ def register_request_logger_middleware(application: FastAPI) -> None:
         # log, ela NÃO é lugar para segredo. Um token na URL acaba
         # gravado aqui, no histórico do navegador e no log de todo proxy
         # do caminho. Segredo viaja em cabeçalho, como o INTERNAL-TOKEN.
-        requested_path = request.url.path
+        path = loggable_path(request.url.path)
+        requested_path = path
         if request.url.query:
-            requested_path = f"{requested_path}?{request.url.query}"
+            requested_path = f"{path}?{loggable_text(request.url.query)}"
 
         started_at = time.perf_counter()
-        logger.info(f"ENTROU {request.method} {requested_path}")
+        logger.info(f"ENTROU {request.method} {requested_path}", extra={"event": "request_received"})
 
         response = await call_next(request)
 
         elapsed_ms = (time.perf_counter() - started_at) * 1000
-        logger.info(f"SAIU {response.status_code} {request.method} {request.url.path} - {elapsed_ms:.1f} ms")
+        logger.info(
+            f"SAIU {response.status_code} {request.method} {path} - {elapsed_ms:.1f} ms",
+            extra={"event": "response_sent", "http_status": response.status_code, "details": {"elapsed_ms": round(elapsed_ms, 1)}},
+        )
 
         return response

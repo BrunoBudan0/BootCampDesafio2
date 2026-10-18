@@ -57,6 +57,17 @@ def set_request_id(request_id: str) -> None:
     _request_id.set(request_id)
 
 
+_request_route: ContextVar[tuple] = ContextVar("request_route", default=(None, None))
+
+
+def get_request_route() -> tuple:
+    return _request_route.get()
+
+
+def set_request_route(http_method: str, loggable_path: str) -> None:
+    _request_route.set((http_method, loggable_path))
+
+
 def build_request_id(received_request_id: str = None) -> str:
     """Aproveita o identificador que veio de fora, ou inventa um novo.
 

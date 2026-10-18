@@ -184,6 +184,26 @@ CREATE TABLE source_nightly_limit(
 
 CREATE INDEX ix_source_nightly_limit_source_document_number ON source_nightly_limit(source_document_number, effective_at);
 
+CREATE TABLE system_log(
+    id                              BIGSERIAL PRIMARY KEY,
+    request_id                      VARCHAR(64) NOT NULL,
+    level                           VARCHAR(10) NOT NULL,
+    event                           VARCHAR(50) NOT NULL,
+    logger_name                     VARCHAR(150) NOT NULL,
+    message                         TEXT NOT NULL,
+    http_method                     VARCHAR(10),
+    path                            VARCHAR(500),
+    http_status                     SMALLINT,
+    error_code                      VARCHAR(20),
+    details                         JSONB,
+    stack_trace                     TEXT,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE INDEX ix_system_log_created_at ON system_log(created_at DESC, id DESC);
+CREATE INDEX ix_system_log_request_id ON system_log(request_id);
+CREATE INDEX ix_system_log_event ON system_log(event, created_at DESC);
+
 CREATE VIEW accepted_pix AS
 SELECT
     pix_analysis.*,
@@ -215,7 +235,8 @@ BEGIN
         'pix_analysis_rule_hit',
         'two_factor_confirmation',
         'registered_device',
-        'source_nightly_limit'
+        'source_nightly_limit',
+        'system_log'
     ]
     LOOP
         EXECUTE format(

@@ -10,3 +10,4 @@ from models.pix_analysis import PixAnalysis
 from models.registered_device import RegisteredDevice
 from models.source_nightly_limit import SourceNightlyLimit
 from models.accepted_pix import AcceptedPix
+from models.system_log import SystemLog
