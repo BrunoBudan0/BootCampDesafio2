@@ -186,6 +186,15 @@ class TestEditRiskPolicy:
         assert rule_setting(body, "burst_of_pix") == dict(rule_setting(before, "burst_of_pix"), points=30)
         assert current_bank_policy() == body
 
+    def test_decimal_threshold_is_returned_as_saved(self, restore_bank_policy):
+        created = edit_bank_policy(
+            {"change_reason": "Multiplicador entre o equilibrado e o conservador", "rules": [{"code": "amount_above_baseline", "threshold": 4.5}]},
+            "editar o multiplicador",
+        )
+
+        assert rule_setting(created, "amount_above_baseline")["threshold"] == 4.5
+        assert rule_setting(current_bank_policy(), "amount_above_baseline")["threshold"] == 4.5
+
     def test_old_version_stays_readable_and_unchanged(self, restore_bank_policy):
         before = current_bank_policy()
         edit_bank_policy({"change_reason": "Muda a validade do 2FA", "parameters": {"two_factor_validity_minutes": 5}}, "editar a política")
