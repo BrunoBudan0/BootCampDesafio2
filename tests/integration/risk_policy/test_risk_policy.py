@@ -155,7 +155,7 @@ class TestReadRiskPolicy:
         assert sorted(policy["rules"], key=lambda setting: setting["code"]) == sorted(balanced["rules"], key=lambda setting: setting["code"])
 
     def test_unknown_version_is_refused_with_404(self):
-        for unknown_version in ("999999", "zero", "-1"):
+        for unknown_version in ("999999", "zero", "-1", "²", "1" * 20):
             status, body = RequestGenerator.GET_risk_policy_version(unknown_version)
 
             assert_error(status, body, 404, "QIT001011")
@@ -328,6 +328,9 @@ class TestEditRiskPolicy:
             {"change_reason": "Modelo desconhecido", "based_on_template": "aggressive"},
             {"change_reason": "Ajuste vazio", "rules": [{"code": "burst_of_pix"}]},
             {"change_reason": "Tipo errado", "parameters": {"two_factor_score_threshold": "40"}},
+            {"change_reason": "Limite com três casas", "rules": [{"code": "amount_above_baseline", "threshold": 4.555}]},
+            {"change_reason": "Limite que viraria zero", "rules": [{"code": "amount_above_baseline", "threshold": 0.001}]},
+            {"change_reason": "Limite de PJ com três casas", "rules": [{"code": "destination_document_in_many_accounts", "company_threshold": 10.005}]},
         ],
     )
     def test_invalid_body_is_refused_with_400_and_creates_no_version(self, invalid_body):

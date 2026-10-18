@@ -1,4 +1,5 @@
-from decimal import ROUND_HALF_UP, Decimal
+import re
+from decimal import Decimal
 
 from psycopg2.errors import UniqueViolation
 from sqlalchemy.exc import IntegrityError
@@ -8,6 +9,7 @@ from dtos import risk_policy_response, risk_policy_templates_response
 from errors import (
     ConcurrentRiskPolicyEdit,
     InconsistentRiskPolicy,
+    InvalidSchema,
     RegulatoryRuleNotEditable,
     RepeatedRuleSetting,
     RiskPolicyVersionNotFound,
@@ -20,9 +22,9 @@ from repositories import RiskPolicyRepository, RuleRepository
 
 BANK_POLICY_NAME = "bank"
 TEMPLATE_POLICY_KIND = "template"
-LARGEST_VERSION_DIGITS = 9
+VERSION_NUMBER_PATTERN = re.compile(r"[0-9]{1,9}")
 MINUTES_PER_DAY = 1440
-DECIMAL_SETTING_PLACES = Decimal("0.01")
+DECIMAL_SETTING_LARGEST_EXPONENT = -2
 DECIMAL_SETTING_FIELDS = ("threshold", "company_threshold")
 
 
@@ -36,7 +38,7 @@ class RiskPolicyController(BaseController):
         return risk_policy_response(self.risk_policy_repository.find_current_version(BANK_POLICY_NAME))
 
     def get_bank_policy_version(self, version: str) -> dict:
-        if not version.isdigit() or len(version) > LARGEST_VERSION_DIGITS:
+        if VERSION_NUMBER_PATTERN.fullmatch(version) is None:
             raise RiskPolicyVersionNotFound()
 
         policy_version = self.risk_policy_repository.find_version(BANK_POLICY_NAME, int(version))
@@ -102,6 +104,10 @@ class RiskPolicyController(BaseController):
                 if not self.rule_accepts_setting(rule, field):
                     raise RuleSettingNotApplicable(code, field)
 
+            for field in DECIMAL_SETTING_FIELDS:
+                if field in setting_changes:
+                    setting_changes[field] = self.decimal_with_two_places(code, field, setting_changes[field])
+
             rule_edits[code] = setting_changes
 
         return rule_edits
@@ -118,13 +124,18 @@ class RiskPolicyController(BaseController):
         return accepted_settings[field]
 
     @staticmethod
+    def decimal_with_two_places(code: str, field: str, value) -> Decimal:
+        decimal_value = Decimal(str(value))
+
+        if decimal_value.as_tuple().exponent < DECIMAL_SETTING_LARGEST_EXPONENT:
+            raise InvalidSchema(f"{value} has more than two decimal places in rules.{code}.{field}")
+
+        return decimal_value
+
+    @staticmethod
     def edited_rule_setting(base_setting: RiskPolicyRuleSetting, setting_changes: dict) -> RiskPolicyRuleSetting:
         setting_values = {field: getattr(base_setting, field) for field in RiskPolicyRuleSetting.EDITABLE_FIELDS}
-
-        for field, value in setting_changes.items():
-            if field in DECIMAL_SETTING_FIELDS:
-                value = Decimal(str(value)).quantize(DECIMAL_SETTING_PLACES, rounding=ROUND_HALF_UP)
-            setting_values[field] = value
+        setting_values.update(setting_changes)
 
         return RiskPolicyRuleSetting(rule=base_setting.rule, **setting_values)
 
