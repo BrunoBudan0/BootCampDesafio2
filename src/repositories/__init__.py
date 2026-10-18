@@ -2,4 +2,4 @@ from repositories.rule_repository import RuleRepository
 from repositories.risk_policy_repository import RiskPolicyRepository
 from repositories.pix_analysis_repository import PixAnalysisRepository
 from repositories.source_repository import SourceRepository
-from repositories.advisory_lock_repository import AdvisoryLockRepository
+from repositories.advisory_lock_repository import AdvisoryLockRepository, source_lock_name

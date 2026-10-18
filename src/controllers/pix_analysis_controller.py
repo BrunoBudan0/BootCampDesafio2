@@ -13,23 +13,19 @@ from errors import (
     TwoFactorNotRequested,
     TwoFactorOutsideValidity,
 )
-from models import PixAnalysis, PixAnalysisRuleHit, RegisteredDevice, TwoFactorConfirmation
+from models import PixAnalysis, PixAnalysisRuleHit, RegisteredDevice, RiskPolicy, TwoFactorConfirmation
 from repositories import (
     AdvisoryLockRepository,
     PixAnalysisRepository,
     RiskPolicyRepository,
     RuleRepository,
     SourceRepository,
+    source_lock_name,
 )
 
 
-BANK_POLICY_NAME = "bank"
 CREATED = 201
 REPLAYED = 200
-
-
-def source_lock_name(source_document: str) -> str:
-    return f"source:{source_document}"
 
 
 class PixAnalysisController(BaseController):
@@ -57,7 +53,7 @@ class PixAnalysisController(BaseController):
             return self.replayed_analysis(recorded, pix.payload_hash)
 
         rules_by_code = self.rule_repository.find_all_by_code()
-        policy_version = self.risk_policy_repository.find_current_version(BANK_POLICY_NAME)
+        policy_version = self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME)
         context = TransactionContext(pix, policy_version, self.pix_analysis_repository, self.source_repository)
         outcome = AnalysisDecision(rules_by_code).decide(context)
         registers_first_seen_device = (

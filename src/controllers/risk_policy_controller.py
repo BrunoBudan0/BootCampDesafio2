@@ -15,11 +15,10 @@ from errors import (
     RuleSettingNotApplicable,
     UnknownRule,
 )
-from models import Rule, RiskPolicyRuleSetting, RiskPolicyVersion
+from models import Rule, RiskPolicy, RiskPolicyRuleSetting, RiskPolicyVersion
 from repositories import RiskPolicyRepository, RuleRepository
 
 
-BANK_POLICY_NAME = "bank"
 TEMPLATE_POLICY_KIND = "template"
 VERSION_NUMBER_PATTERN = re.compile(r"[0-9]{1,9}")
 MINUTES_PER_DAY = 1440
@@ -35,13 +34,13 @@ class RiskPolicyController(BaseController):
         self.rule_repository = RuleRepository(self.context)
 
     def get_current_bank_policy(self) -> dict:
-        return risk_policy_response(self.risk_policy_repository.find_current_version(BANK_POLICY_NAME))
+        return risk_policy_response(self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME))
 
     def get_bank_policy_version(self, version: str) -> dict:
         if VERSION_NUMBER_PATTERN.fullmatch(version) is None:
             raise RiskPolicyVersionNotFound()
 
-        policy_version = self.risk_policy_repository.find_version(BANK_POLICY_NAME, int(version))
+        policy_version = self.risk_policy_repository.find_version(RiskPolicy.BANK_NAME, int(version))
 
         if policy_version is None:
             raise RiskPolicyVersionNotFound()
@@ -53,8 +52,8 @@ class RiskPolicyController(BaseController):
 
     def create_bank_policy_version(self, payload: dict) -> dict:
         rule_edits = self.validated_rule_edits(payload.get("rules", []), self.rule_repository.find_all_by_code())
-        current_version = self.risk_policy_repository.find_current_version(BANK_POLICY_NAME)
-        base_version = self.risk_policy_repository.find_current_version(payload.get("based_on_template", BANK_POLICY_NAME))
+        current_version = self.risk_policy_repository.find_current_version(RiskPolicy.BANK_NAME)
+        base_version = self.risk_policy_repository.find_current_version(payload.get("based_on_template", RiskPolicy.BANK_NAME))
 
         new_version = RiskPolicyVersion(
             risk_policy=current_version.risk_policy,

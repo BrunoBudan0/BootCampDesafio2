@@ -3,6 +3,10 @@ import hashlib
 from sqlalchemy import text
 
 
+def source_lock_name(source_document: str) -> str:
+    return f"source:{source_document}"
+
+
 def advisory_lock_number(lock_name: str) -> int:
     digest = hashlib.sha256(lock_name.encode()).digest()
     return int.from_bytes(digest[:8], byteorder="big", signed=True)

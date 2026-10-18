@@ -3,7 +3,7 @@ from controllers.rules import nightly_limit_effective_at, required_datetime
 from dtos import source_nightly_limit_response
 from errors import InvalidDocumentNumber, NightlyLimitOnlyForIndividuals
 from models import SourceNightlyLimit
-from repositories import AdvisoryLockRepository, SourceRepository
+from repositories import AdvisoryLockRepository, SourceRepository, source_lock_name
 from utils.document_number import is_valid_document_number, normalized_document_number, person_type_of
 
 
@@ -23,7 +23,7 @@ class SourceController(BaseController):
             raise NightlyLimitOnlyForIndividuals()
 
         requested_at = required_datetime(payload["requested_at"], "requested_at")
-        self.advisory_lock_repository.lock_until_commit([f"source:{source_document}"])
+        self.advisory_lock_repository.lock_until_commit([source_lock_name(source_document)])
         nightly_limits = self.source_repository.find_nightly_limits(source_document)
 
         nightly_limit = SourceNightlyLimit(

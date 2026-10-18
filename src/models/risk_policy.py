@@ -6,6 +6,8 @@ from models.base import Base
 class RiskPolicy(Base):
     __tablename__ = "risk_policy"
 
+    BANK_NAME = "bank"
+
     id = Column(Integer, primary_key=True)
     name = Column(String(50), nullable=False, unique=True)
     kind = Column(String(10), nullable=False)
