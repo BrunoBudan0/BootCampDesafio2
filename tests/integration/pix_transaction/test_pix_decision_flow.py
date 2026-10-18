@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 
 from tests.utils.assertions import rule_codes, rule_hit
@@ -9,6 +10,7 @@ from tests.utils.pix_payload import (
     payee_owned_by,
     payer_on_another_device,
     pix_payload,
+    same_payee_in_another_account,
 )
 from tests.utils.request_generator import RequestGenerator
 from tests.utils.scenario import (
@@ -64,7 +66,7 @@ class TestPixDecisionFlow:
 
         analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date))
 
-        assert analysis["metadata"]["destination_risk"] == 60
+        assert analysis["metadata"]["destination_risk"] == 55
 
     def test_reducers_subtract_from_the_score(self):
         transaction_date = business_hours_today()
@@ -164,16 +166,56 @@ class TestPixDecisionFlow:
         assert set(hit) == RULE_HIT_FIELDS
         assert hit["kind"] == "scoring"
         assert hit["family"] == "counterparty"
-        assert hit["points"] == 30
+        assert hit["points"] == 25
         assert hit["reason"].strip()
 
     def test_destination_risk_from_thirty_raises_an_alert_without_changing_the_decision(self):
         transaction_date = business_hours_today()
+        payee = new_individual_payee()
+        other_payers_paying(payee, transaction_date, 4)
 
-        analysis = analyze(pix_payload(new_individual_payer(), very_recent_individual_payee(transaction_date), transaction_date))
+        analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date))
 
         assert analysis["status"] == "approved"
         assert analysis["metadata"]["alerts"] == [{"code": "destination_alert", "destination_risk": 30, "threshold": 30}]
+
+    def test_very_recent_destination_account_alone_raises_no_alert(self):
+        transaction_date = business_hours_today()
+
+        analysis = analyze(pix_payload(new_individual_payer(), very_recent_individual_payee(transaction_date), transaction_date))
+
+        assert analysis["metadata"]["destination_risk"] == 25
+        assert analysis["metadata"]["alerts"] == []
+
+    def test_reducers_do_not_abate_signals_seen_by_the_whole_base(self):
+        transaction_date = business_hours_today()
+        payer = new_individual_payer()
+        own_account = payee_owned_by(payer)
+        other_payers_paying(own_account, transaction_date, 4)
+
+        analysis = analyze(pix_payload(payer, own_account, transaction_date))
+
+        assert {"destination_receiving_from_many_sources", "same_owner"} <= rule_codes(analysis)
+        assert analysis["metadata"]["risk_score"] == 0
+        assert analysis["metadata"]["destination_risk"] == 30
+
+    def test_known_destination_abates_the_relationship_signals(self):
+        transaction_date = business_hours_today()
+        payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
+        new_account_of_the_payee = replace(same_payee_in_another_account(payee), opening_date=transaction_date - timedelta(days=6))
+
+        analysis = analyze(pix_payload(payer, new_account_of_the_payee, transaction_date))
+
+        assert {"destination_account_opened_very_recently", "known_destination"} <= rule_codes(analysis)
+        assert analysis["metadata"]["destination_risk"] == 5
+
+    def test_eliminatory_rule_hides_a_regulatory_rule_that_would_also_fire(self):
+        night = today_at(23)
+
+        analysis = analyze(pix_payload(new_account_payer(night), new_individual_payee(), night, 500001))
+
+        assert analysis["status"] == "rejected"
+        assert rule_codes(analysis) == {"new_account_to_new_destination_far_above_cap"}
 
     def test_destination_risk_below_thirty_raises_no_alert(self):
         transaction_date = business_hours_today()
@@ -194,3 +236,26 @@ class TestPixDecisionFlow:
         assert [status for status, _ in responses] == [201] * 5
         burst_hits = [body for status, body in responses if "burst_of_pix" in rule_codes(body)]
         assert len(burst_hits) == 1
+
+    def test_parallel_payers_on_the_same_device_see_each_other(self):
+        transaction_date = now_in_sao_paulo()
+        shared_device = new_individual_payer().device_id
+        payloads = [pix_payload(new_individual_payer(), new_individual_payee(), transaction_date, device_id=shared_device) for _ in range(5)]
+
+        responses = fire_together([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
+
+        assert [status for status, _ in responses] == [201] * 5
+        rejected_by_shared_device = [body for _, body in responses if "device_used_by_many_sources" in rule_codes(body)]
+        assert len(rejected_by_shared_device) == 1
+        assert rejected_by_shared_device[0]["status"] == "rejected"
+
+    def test_parallel_payers_of_the_same_destination_see_each_other(self):
+        transaction_date = now_in_sao_paulo()
+        payee = new_individual_payee()
+        payloads = [pix_payload(new_individual_payer(), payee, transaction_date) for _ in range(5)]
+
+        responses = fire_together([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
+
+        assert [status for status, _ in responses] == [201] * 5
+        fan_in_hits = [body for _, body in responses if "destination_receiving_from_many_sources" in rule_codes(body)]
+        assert len(fan_in_hits) == 1

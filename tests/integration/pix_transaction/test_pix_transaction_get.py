@@ -41,6 +41,7 @@ class TestPixTransactionGet:
 
         status, body = RequestGenerator.GET_pix_transaction(payload["id"])
 
+        assert status == 200
         text = json.dumps(body)
         for document_number in (payer.document_number, payee.document_number):
             digits = document_number.replace(".", "").replace("-", "").replace("/", "")
@@ -53,8 +54,8 @@ class TestPixTransactionGet:
 
         status, body = RequestGenerator.GET_pix_transaction(payload["id"])
 
-        two_factor = body["metadata"]["two_factor"]
         assert status == 200
+        two_factor = body["metadata"]["two_factor"]
         assert two_factor["status"] == "pending"
         assert parse_iso(two_factor["expires_at"]) == transaction_date + timedelta(minutes=10)
         assert two_factor["confirmed_at"] is None
@@ -73,5 +74,6 @@ class TestPixTransactionGet:
 
         status, body = RequestGenerator.GET_pix_transaction(payload["id"])
 
+        assert status == 200
         assert body["status"] == "approved"
         assert body["metadata"]["two_factor"] is None

@@ -8,7 +8,7 @@ from tests.utils.pix_payload import new_company_payee, new_individual_payee, new
 from tests.utils.random_generator import RandomGenerator
 from tests.utils.request_generator import RequestGenerator
 from tests.utils.requisition import ClientRequisition
-from tests.utils.scenario import analyze, analyze_expecting, confirm_two_factor, two_factor_pix
+from tests.utils.scenario import analyze, analyze_expecting, confirm_two_factor, fire_together, two_factor_pix
 
 
 def confirmation(result, confirmed_at):
@@ -50,6 +50,31 @@ class TestTwoFactorConfirmation:
 
         assert status == 200
         assert body == first
+
+    def test_same_result_with_another_moment_keeps_the_first_confirmation(self):
+        transaction_date = business_hours_today()
+        _, _, payload, _ = two_factor_pix(transaction_date)
+        first = confirm_two_factor(payload["id"], "confirmed", transaction_date + timedelta(minutes=3))
+
+        status, body = RequestGenerator.POST_two_factor_confirmation(
+            payload["id"], confirmation("confirmed", transaction_date + timedelta(minutes=5))
+        )
+
+        assert status == 200
+        assert body == first
+
+    def test_parallel_opposite_results_record_only_one(self):
+        transaction_date = business_hours_today()
+        _, _, payload, _ = two_factor_pix(transaction_date)
+        bodies = [confirmation(result, transaction_date + timedelta(minutes=3)) for result in ("confirmed", "denied")]
+
+        responses = fire_together([lambda body=body: RequestGenerator.POST_two_factor_confirmation(payload["id"], body) for body in bodies])
+
+        assert sorted(status for status, _ in responses) == [201, 409]
+        winner = next(body for status, body in responses if status == 201)
+        get_status, recorded = RequestGenerator.GET_pix_transaction(payload["id"])
+        assert get_status == 200
+        assert recorded == winner
 
     def test_other_result_after_a_confirmation_is_refused_with_409_and_keeps_the_first(self):
         transaction_date = business_hours_today()

@@ -6,7 +6,7 @@
     "properties": {
         "id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
         },
         "amount": {"$ref": "definitions.json#/definitions/amount_cents"},
         "transaction_date": {"$ref": "definitions.json#/definitions/date_time_with_offset"},

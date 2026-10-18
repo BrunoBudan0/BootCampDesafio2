@@ -10,6 +10,7 @@ CREATE TABLE rule(
     code                            VARCHAR(80) NOT NULL,
     kind                            VARCHAR(20) NOT NULL,
     family                          VARCHAR(20),
+    counterparty_signal             VARCHAR(15),
     forced_decision_id              INTEGER REFERENCES decision(id),
     threshold_unit                  VARCHAR(30),
     uses_window                     BOOLEAN NOT NULL,
@@ -19,8 +20,10 @@ CREATE TABLE rule(
     UNIQUE(code),
     CONSTRAINT ck_rule_kind CHECK (kind IN ('scoring', 'reducer', 'eliminatory', 'regulatory')),
     CONSTRAINT ck_rule_family CHECK (family IN ('identity', 'velocity', 'amount', 'counterparty')),
+    CONSTRAINT ck_rule_counterparty_signal CHECK (counterparty_signal IN ('relationship', 'base')),
     CONSTRAINT ck_rule_threshold_unit CHECK (threshold_unit IN ('count', 'days', 'km_per_hour', 'multiplier', 'credibility_weight')),
     CONSTRAINT ck_rule_family_only_for_scoring CHECK ((kind = 'scoring') = (family IS NOT NULL)),
+    CONSTRAINT ck_rule_counterparty_signal_only_for_counterparty CHECK ((family IS NOT DISTINCT FROM 'counterparty') = (counterparty_signal IS NOT NULL)),
     CONSTRAINT ck_rule_forced_decision_only_for_eliminatory_and_regulatory CHECK ((kind IN ('eliminatory', 'regulatory')) = (forced_decision_id IS NOT NULL)),
     CONSTRAINT ck_rule_regulatory_without_settings CHECK (kind <> 'regulatory' OR (threshold_unit IS NULL AND NOT uses_window AND NOT uses_company_threshold))
 );
@@ -256,41 +259,42 @@ INSERT INTO decision (enumerator) VALUES
 ('two_factor_required'),
 ('rejected');
 
-INSERT INTO rule (code, kind, family, forced_decision_id, threshold_unit, uses_window, uses_company_threshold, description)
+INSERT INTO rule (code, kind, family, counterparty_signal, forced_decision_id, threshold_unit, uses_window, uses_company_threshold, description)
 SELECT
     catalog.code,
     catalog.kind,
     catalog.family,
+    catalog.counterparty_signal,
     decision.id,
     catalog.threshold_unit,
     catalog.uses_window,
     catalog.uses_company_threshold,
     catalog.description
 FROM (VALUES
-    ('device_used_by_many_sources', 'eliminatory', NULL, 'rejected', 'count', true, false, 'Mesmo aparelho usado por muitos pagadores diferentes em pouco tempo.'),
-    ('impossible_travel_on_unregistered_device', 'eliminatory', NULL, 'rejected', 'km_per_hour', false, false, 'Viagem impossível num dispositivo não cadastrado.'),
-    ('new_account_to_new_destination_far_above_cap', 'eliminatory', NULL, 'rejected', 'multiplier', false, false, 'Conta nova pagando um destino novo muito acima do teto de conta nova.'),
-    ('nightly_limit_exceeded', 'regulatory', NULL, 'rejected', NULL, false, false, 'Soma da noite entre PF acima do limite noturno, no horário local do Pix.'),
-    ('unregistered_device_limit_exceeded', 'regulatory', NULL, 'two_factor_required', NULL, false, false, 'Aparelho não cadastrado acima dos limites da Res. BCB 403: R$ 200 por Pix ou R$ 1.000 por dia.'),
-    ('impossible_travel', 'scoring', 'identity', NULL, 'km_per_hour', false, false, 'Dois Pix seguidos do pagador em locais que exigiriam mais de 900 km/h.'),
-    ('ip_unfamiliar', 'scoring', 'identity', NULL, 'credibility_weight', false, false, 'IP pouco usado nos Pix aceitos do pagador. Os pontos caem conforme a credibilidade sobe.'),
-    ('location_unfamiliar', 'scoring', 'identity', NULL, 'credibility_weight', false, false, 'Local pouco usado nos Pix aceitos do pagador. Os pontos caem conforme a credibilidade sobe.'),
-    ('channel_unfamiliar', 'scoring', 'identity', NULL, 'credibility_weight', false, false, 'Canal pouco usado nos Pix aceitos do pagador. Os pontos caem conforme a credibilidade sobe.'),
-    ('two_factor_denied_recently', 'scoring', 'identity', NULL, NULL, true, false, 'O pagador recusou um 2FA há pouco tempo.'),
-    ('new_account_above_cap', 'scoring', 'velocity', NULL, NULL, false, false, 'Conta de origem nova pagando acima do teto de conta nova.'),
-    ('burst_of_pix', 'scoring', 'velocity', NULL, 'count', true, false, 'Muitos Pix do mesmo pagador em poucos minutos.'),
-    ('amount_above_baseline', 'scoring', 'amount', NULL, 'multiplier', false, false, 'Pix acima do multiplicador vezes a base de comparação do par pagador e recebedor.'),
-    ('monthly_volume_above_typical', 'scoring', 'amount', NULL, 'multiplier', true, false, 'Volume do mês acima do volume mensal típico do pagador.'),
-    ('destination_account_opened_very_recently', 'scoring', 'counterparty', NULL, 'days', false, false, 'Conta de destino aberta há muito pouco tempo.'),
-    ('destination_account_opened_recently', 'scoring', 'counterparty', NULL, 'days', false, false, 'Conta de destino aberta há poucos dias.'),
-    ('new_destination_above_usual_ceiling', 'scoring', 'counterparty', NULL, NULL, false, false, 'Destino novo recebendo acima do teto habitual do pagador.'),
-    ('destination_receiving_from_many_sources', 'scoring', 'counterparty', NULL, 'count', true, false, 'Recebedor PF recebendo de muitos pagadores diferentes em pouco tempo.'),
-    ('destination_rejected_for_other_sources', 'scoring', 'counterparty', NULL, 'count', true, false, 'Recebedor com Pix reprovados ou 2FA recusados de outros pagadores.'),
-    ('destination_document_in_many_accounts', 'scoring', 'counterparty', NULL, 'count', true, true, 'Mesmo documento de recebedor recebendo em várias contas de destino diferentes.'),
-    ('same_owner', 'reducer', NULL, NULL, NULL, false, false, 'Documento do pagador igual ao do recebedor.'),
-    ('known_destination', 'reducer', NULL, NULL, 'count', false, false, 'Recebedor com vários Pix aceitos do pagador.'),
-    ('long_registered_device', 'reducer', NULL, NULL, 'days', false, false, 'Dispositivo cadastrado há muito tempo.')
-) AS catalog(code, kind, family, forced_decision, threshold_unit, uses_window, uses_company_threshold, description)
+    ('device_used_by_many_sources', 'eliminatory', NULL, NULL, 'rejected', 'count', true, false, 'Mesmo aparelho usado por muitos pagadores diferentes em pouco tempo.'),
+    ('impossible_travel_on_unregistered_device', 'eliminatory', NULL, NULL, 'rejected', 'km_per_hour', false, false, 'Viagem impossível num dispositivo não cadastrado.'),
+    ('new_account_to_new_destination_far_above_cap', 'eliminatory', NULL, NULL, 'rejected', 'multiplier', false, false, 'Conta nova pagando um destino novo muito acima do teto de conta nova.'),
+    ('nightly_limit_exceeded', 'regulatory', NULL, NULL, 'rejected', NULL, false, false, 'Soma da noite entre PF acima do limite noturno, no horário local do Pix.'),
+    ('unregistered_device_limit_exceeded', 'regulatory', NULL, NULL, 'two_factor_required', NULL, false, false, 'Aparelho não cadastrado acima dos limites da Res. BCB 403: R$ 200 por Pix ou R$ 1.000 por dia.'),
+    ('impossible_travel', 'scoring', 'identity', NULL, NULL, 'km_per_hour', false, false, 'Dois Pix seguidos do pagador em locais que exigiriam mais de 900 km/h.'),
+    ('ip_unfamiliar', 'scoring', 'identity', NULL, NULL, 'credibility_weight', false, false, 'IP pouco usado nos Pix aceitos do pagador. Os pontos caem conforme a credibilidade sobe.'),
+    ('location_unfamiliar', 'scoring', 'identity', NULL, NULL, 'credibility_weight', false, false, 'Local pouco usado nos Pix aceitos do pagador. Os pontos caem conforme a credibilidade sobe.'),
+    ('channel_unfamiliar', 'scoring', 'identity', NULL, NULL, 'credibility_weight', false, false, 'Canal pouco usado nos Pix aceitos do pagador. Os pontos caem conforme a credibilidade sobe.'),
+    ('two_factor_denied_recently', 'scoring', 'identity', NULL, NULL, NULL, true, false, 'O pagador recusou um 2FA há pouco tempo.'),
+    ('new_account_above_cap', 'scoring', 'velocity', NULL, NULL, NULL, false, false, 'Conta de origem nova pagando acima do teto de conta nova.'),
+    ('burst_of_pix', 'scoring', 'velocity', NULL, NULL, 'count', true, false, 'Muitos Pix do mesmo pagador em poucos minutos.'),
+    ('amount_above_baseline', 'scoring', 'amount', NULL, NULL, 'multiplier', false, false, 'Pix acima do multiplicador vezes a base de comparação do par pagador e recebedor.'),
+    ('monthly_volume_above_typical', 'scoring', 'amount', NULL, NULL, 'multiplier', true, false, 'Volume do mês acima do volume mensal típico do pagador.'),
+    ('destination_account_opened_very_recently', 'scoring', 'counterparty', 'relationship', NULL, 'days', false, false, 'Conta de destino aberta há muito pouco tempo.'),
+    ('destination_account_opened_recently', 'scoring', 'counterparty', 'relationship', NULL, 'days', false, false, 'Conta de destino aberta há poucos dias.'),
+    ('new_destination_above_usual_ceiling', 'scoring', 'counterparty', 'relationship', NULL, NULL, false, false, 'Destino novo recebendo acima do teto habitual do pagador.'),
+    ('destination_receiving_from_many_sources', 'scoring', 'counterparty', 'base', NULL, 'count', true, false, 'Recebedor PF recebendo, de muitos pagadores diferentes em pouco tempo, Pix a partir do piso das regras de valor.'),
+    ('destination_rejected_for_other_sources', 'scoring', 'counterparty', 'base', NULL, 'count', true, false, 'Recebedor com 2FA recusados, ou com Pix reprovados por sinal de contraparte, vindos de outros pagadores.'),
+    ('destination_document_in_many_accounts', 'scoring', 'counterparty', 'base', NULL, 'count', true, true, 'Mesmo documento de recebedor recebendo em várias contas de destino diferentes.'),
+    ('same_owner', 'reducer', NULL, NULL, NULL, NULL, false, false, 'Documento do pagador igual ao do recebedor.'),
+    ('known_destination', 'reducer', NULL, NULL, NULL, 'count', false, false, 'Recebedor com vários Pix aceitos do pagador.'),
+    ('long_registered_device', 'reducer', NULL, NULL, NULL, 'days', false, false, 'Dispositivo cadastrado há muito tempo.')
+) AS catalog(code, kind, family, counterparty_signal, forced_decision, threshold_unit, uses_window, uses_company_threshold, description)
 LEFT JOIN decision ON decision.enumerator = catalog.forced_decision;
 
 INSERT INTO risk_policy (name, kind) VALUES
@@ -424,7 +428,7 @@ FROM (VALUES
     ('burst_of_pix', 25, 5, 5, NULL),
     ('amount_above_baseline', 25, NULL, NULL, NULL),
     ('monthly_volume_above_typical', 20, 3, 43200, NULL),
-    ('destination_account_opened_very_recently', 30, 7, NULL, NULL),
+    ('destination_account_opened_very_recently', 25, 7, NULL, NULL),
     ('destination_account_opened_recently', 20, 30, NULL, NULL),
     ('new_destination_above_usual_ceiling', 25, NULL, NULL, NULL),
     ('destination_receiving_from_many_sources', 30, 5, 60, NULL),

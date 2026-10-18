@@ -19,6 +19,7 @@ from tests.utils.request_generator import RequestGenerator
 NEW_ACCOUNT_AGE = timedelta(days=10)
 NEW_ACCOUNT_TWO_FACTOR_AMOUNT_CENTS = 150000
 NIGHTLY_LIMIT_BREAKING_AMOUNT_CENTS = 150000
+FAR_ABOVE_NEW_ACCOUNT_CAP_AMOUNT_CENTS = 500001
 HISTORY_SPACING = timedelta(days=1)
 RESTORE_BALANCED_POLICY = {
     "change_reason": "Restaura o modelo equilibrado depois de um teste que editou a política",
@@ -102,6 +103,12 @@ def nightly_rejected_pix(payee: Payee, transaction_date: datetime, payer: Payer 
     return analyze_expecting(payload, "rejected", "estourar o limite noturno")
 
 
+def counterparty_rejected_pix(payee: Payee, transaction_date: datetime, payer: Payer = None) -> dict:
+    payer = payer or new_account_payer(transaction_date)
+    payload = pix_payload(payer, payee, transaction_date, FAR_ABOVE_NEW_ACCOUNT_CAP_AMOUNT_CENTS)
+    return analyze_expecting(payload, "rejected", "conta nova pagando destino novo muito acima do teto")
+
+
 def fire_together(calls: list) -> list:
     start_line = threading.Barrier(len(calls))
 
@@ -124,4 +131,5 @@ def current_bank_policy() -> dict:
 
 
 def restore_balanced_bank_policy() -> None:
-    RequestGenerator.POST_risk_policy_version(RESTORE_BALANCED_POLICY)
+    status, body = RequestGenerator.POST_risk_policy_version(RESTORE_BALANCED_POLICY)
+    assert status == 201, f"A política não voltou ao modelo equilibrado e o resto da suíte rodaria com a política errada: HTTP {status} {body}"

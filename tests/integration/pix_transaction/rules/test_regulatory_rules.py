@@ -95,6 +95,24 @@ class TestNightlyLimit:
         assert_rule_fired(sent_with_utc_offset, "nightly_limit_exceeded")
         assert_rule_not_fired(sent_with_sao_paulo_offset, "nightly_limit_exceeded")
 
+    def test_pending_two_factor_uses_the_nightly_limit(self):
+        night = today_at(23)
+        payer, payee, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=1), 1)
+        analyze_expecting(pix_payload(payer_on_another_device(payer), payee, night, 90000), "two_factor_required", "Pix no aparelho novo à noite")
+
+        analysis = analyze(pix_payload(payer, payee, night + timedelta(minutes=5), 20000))
+
+        assert_rule_fired(analysis, "nightly_limit_exceeded")
+
+    def test_expired_two_factor_stops_using_the_nightly_limit(self):
+        night = today_at(23)
+        payer, payee, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=1), 1)
+        analyze_expecting(pix_payload(payer_on_another_device(payer), payee, night, 90000), "two_factor_required", "Pix no aparelho novo à noite")
+
+        analysis = analyze(pix_payload(payer, payee, night + timedelta(minutes=15), 20000))
+
+        assert_rule_not_fired(analysis, "nightly_limit_exceeded")
+
     def test_rejected_pix_does_not_use_the_limit(self):
         payer = new_individual_payer()
         analyze_expecting(pix_payload(payer, new_individual_payee(), today_at(21), 150000), "rejected", "Pix que estoura o limite")
@@ -121,7 +139,7 @@ class TestUnregisteredDeviceLimit:
         analysis = analyze(pix_payload(payer_on_another_device(payer), payee, transaction_date, 20001))
 
         assert_rule_fired(analysis, "unregistered_device_limit_exceeded")
-        assert analysis["status"] in ("two_factor_required", "rejected")
+        assert analysis["status"] == "two_factor_required"
 
     def test_unregistered_device_at_200_reais_is_within_the_limit(self):
         transaction_date = business_hours_today()
@@ -150,7 +168,7 @@ class TestUnregisteredDeviceLimit:
 
     def test_daily_sum_restarts_at_local_midnight(self):
         late_evening = today_at(23)
-        payer, payee, _ = payer_with_accepted_history(late_evening - timedelta(days=2), 5, amount_cents=30000)
+        payer, payee, _ = payer_with_accepted_history(late_evening - timedelta(days=2), 5, amount_cents=30000, payee=new_company_payee())
         new_device_payer = payer_on_another_device(payer)
         for position in range(5):
             analyze(pix_payload(new_device_payer, payee, late_evening + timedelta(minutes=10 * position), 19000))
@@ -215,6 +233,20 @@ class TestApprovedNightlyLimit:
 
         assert_rule_fired(before_effective, "nightly_limit_exceeded")
         assert_rule_not_fired(after_effective, "nightly_limit_exceeded")
+
+    def test_lowering_after_a_pending_raise_keeps_the_lower_limit(self):
+        payer = new_individual_payer()
+        raise_requested_at = today_at(9) - timedelta(days=1)
+        for limit_cents, requested_at in ((500000, raise_requested_at), (50000, raise_requested_at + timedelta(hours=1))):
+            status, body = RequestGenerator.POST_source_nightly_limit(
+                payer.document_number,
+                {"nightly_limit_cents": limit_cents, "requested_at": iso(requested_at)},
+            )
+            setup_ok(status, body, f"pedir o limite noturno de {limit_cents} centavos", expected_statuses=(201,))
+
+        analysis = analyze(pix_payload(payer, new_individual_payee(), today_at(22), 60000))
+
+        assert_rule_fired(analysis, "nightly_limit_exceeded")
 
     def test_lowered_limit_applies_immediately(self):
         payer = new_individual_payer()

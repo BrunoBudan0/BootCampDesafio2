@@ -25,7 +25,7 @@ VIEW accepted_pix = pix_analysis aprovadas + pix_analysis com 2FA confirmado
 1. **Só INSERT.** Uma função de gatilho comum recusa UPDATE e DELETE em todas as tabelas. A decisão do motor nunca muda; o 2FA é um fato novo; editar a política cria uma versão nova.
 2. **Um Pix, uma análise.** `pix_id` é UNIQUE. O mesmo id com o mesmo conteúdo devolve a análise gravada; o mesmo id com outro conteúdo é recusado.
 3. **Janelas pela data da transação.** Toda janela termina no `transaction_date` do Pix analisado. Nenhuma regra lê `now()` nem `created_at`. Exceção consciente: o `GET` calcula se um 2FA está pendente ou expirado com o relógio do servidor, porque isso é apresentação, não regra.
-4. **Trava por pagador.** A análise e a confirmação de 2FA começam com `pg_advisory_xact_lock` no documento do pagador. Pix simultâneos do mesmo pagador enxergam uns aos outros.
+4. **Travas por pagador, aparelho e recebedor.** A análise começa com `pg_advisory_xact_lock` no documento do pagador, no `device_id` e no documento do recebedor, sempre na mesma ordem (pelo valor numérico da chave) para não haver deadlock. Pix simultâneos do mesmo pagador, do mesmo aparelho ou para o mesmo recebedor enxergam uns aos outros, o que fecha a rajada, o limite, a fazenda de aparelhos e o fan-in feitos em paralelo. A confirmação de 2FA pega a trava do pagador.
 5. **Um COMMIT por fato.** Análise, regras disparadas e cadastro `first_seen` entram juntos. Confirmação de 2FA e cadastro `two_factor` entram juntos. Versão da política e todos os seus ajustes de regra entram juntos.
 6. **Nenhum id do banco sai da API.** Para fora vão `analysis_key` (UUID), `pix_id`, nome da política e número da versão.
 7. **Dinheiro em centavos** (BIGINT).
@@ -132,7 +132,7 @@ Tudo que chegou e a decisão do motor.
 | Identidade | `id` | BIGSERIAL | PK, nunca sai da API |
 | | `analysis_key` | UUID | UNIQUE. É o `key` da resposta |
 | | `pix_id` | VARCHAR(64) | UNIQUE |
-| | `payload_hash` | CHAR(64) | SHA-256 do corpo normalizado |
+| | `payload_hash` | CHAR(64) | SHA-256 do JSON canônico (chaves em ordem), com documentos só com dígitos e letras, `channel` em minúsculas e `amount` inteiro. As datas entram como vieram |
 | Valor e tempo | `amount_cents` | BIGINT | > 0 |
 | | `transaction_date` | TIMESTAMPTZ | NOT NULL |
 | | `transaction_utc_offset_minutes` | SMALLINT | Entre -720 e 840. O TIMESTAMPTZ guarda em UTC e perde o fuso; esta coluna preserva o horário local |
@@ -209,7 +209,7 @@ Limite noturno do pagador PF quando o banco cliente aprova um valor diferente do
 | `effective_at` | TIMESTAMPTZ | Aumento: pelo menos 24 h depois do pedido, como manda a norma. Redução: na hora do pedido |
 | `created_at` | TIMESTAMPTZ | DEFAULT now() |
 
-O limite que vale numa análise é a linha com o maior `effective_at` até a data da transação.
+O limite que vale numa análise sai do pedido mais recente com `requested_at` até a data da transação: se ele já vale, é o valor dele; se é um aumento ainda pendente, vale o limite em vigor antes dele. Assim uma redução nunca é desfeita por um aumento pedido antes.
 
 ### accepted_pix (VIEW)
 
@@ -295,7 +295,16 @@ Regras de convivência:
 | `GET /risk-policy/versions/{version}` | Uma versão antiga, para auditoria |
 | `POST /risk-policy/versions` | 201 versão nova. Corpo: `change_reason`, `based_on_template` opcional, parâmetros e ajustes que mudam. O resto é herdado. Edição simultânea cai no UNIQUE da versão: 409 |
 
+## Garantido pelo código, não pelo banco
+
+- `two_factor_expires_at` preenchido se e somente se a decisão é `two_factor_required`.
+- `risk_policy_version_id` da análise aponta para uma versão da política `bank`, nunca de um modelo.
+- `registered_device.source_document` é o mesmo da análise de origem.
+- O ajuste de cada regra segue o catálogo: limite nulo quando `threshold_unit` é nulo, janela nula quando `uses_window` é falso, e toda versão tem as 21 linhas.
+- Fuso, números não finitos e limites com mais de 2 casas são recusados antes do INSERT, para nenhum CHECK virar 500.
+- `GET /risk-policy/templates` entra na entrega: os testes exigem.
+
 ## Em aberto
 
 - Pontos das regras marcadas "a definir".
-- Se `GET /risk-policy/templates` entra, para o banco ver os modelos antes de escolher.
+- Decisões de produto levantadas pela revisão de 17/10 e ainda sem resposta: familiaridade (pontuar só valor nunca visto), limite da Res. 403 no início frio, premissa de confiança nas datas, meta de latência e política de falha. Ver o resumo no contexto do time.

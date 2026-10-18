@@ -288,6 +288,8 @@ class TestEditRiskPolicy:
             ({"change_reason": "Limite onde não existe", "rules": [{"code": "new_account_above_cap", "threshold": 2}]}, "QIT001014"),
             ({"change_reason": "Limite de PJ onde não existe", "rules": [{"code": "burst_of_pix", "company_threshold": 10}]}, "QIT001014"),
             ({"change_reason": "Pontos em eliminatória", "rules": [{"code": "device_used_by_many_sources", "points": 10}]}, "QIT001014"),
+            ({"change_reason": "Meio pagador", "rules": [{"code": "burst_of_pix", "threshold": 2.5}]}, "QIT001014"),
+            ({"change_reason": "Mais de duas casas", "rules": [{"code": "amount_above_baseline", "threshold": 4.005}]}, "QIT001014"),
             (
                 {"change_reason": "Regra repetida", "rules": [{"code": "burst_of_pix", "points": 20}, {"code": "burst_of_pix", "points": 30}]},
                 "QIT001015",
@@ -347,6 +349,7 @@ class TestEditRiskPolicy:
 
         created_versions = [body["version"] for status, body in responses if status == 201]
         refused = [body for status, body in responses if status != 201]
+        assert created_versions
         assert len(created_versions) == len(set(created_versions))
         assert all(status in (201, 409) for status, _ in responses)
         assert all(body["code"] == "QIT001017" for body in refused)

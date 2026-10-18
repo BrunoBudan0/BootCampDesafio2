@@ -1,9 +1,11 @@
 import copy
+import json
+from datetime import timedelta
 from uuid import UUID
 
 import pytest
 
-from tests.utils.assertions import assert_error
+from tests.utils.assertions import assert_error, assert_rule_fired, rule_codes
 from tests.utils.clock import business_hours_today, iso
 from tests.utils.pix_payload import (
     new_company_payee,
@@ -13,8 +15,9 @@ from tests.utils.pix_payload import (
     pix_payload,
 )
 from tests.utils.random_generator import RandomGenerator
-from tests.utils.request_generator import RequestGenerator
+from tests.utils.request_generator import INTERNAL_TOKEN, RequestGenerator
 from tests.utils.requisition import ClientRequisition
+from tests.utils.scenario import analyze, payer_with_accepted_history
 
 
 DECISIONS = {"approved", "two_factor_required", "rejected"}
@@ -45,7 +48,7 @@ def without(payload: dict, path: list) -> dict:
 
 def assert_nothing_was_recorded(pix_id: str) -> None:
     status, body = RequestGenerator.GET_pix_transaction(pix_id)
-    assert status == 404, f"O Pix recusado não devia ficar gravado, mas o GET devolveu {status}: {body}"
+    assert_error(status, body, 404, "QIT001001")
 
 
 class TestPixTransactionContract:
@@ -57,7 +60,7 @@ class TestPixTransactionContract:
         assert_error(response.response_status, response.response_json, 403, "QIT000002")
         assert_nothing_was_recorded(payload["id"])
 
-    def test_challenge_example_payload_is_analyzed_with_201(self):
+    def test_challenge_example_payload_is_rejected_by_the_nightly_limit(self):
         payload = {
             "id": RandomGenerator.generate_pix_id(),
             "amount": 150000,
@@ -86,7 +89,8 @@ class TestPixTransactionContract:
         status, body = RequestGenerator.POST_pix_transaction(payload)
 
         assert status == 201
-        assert body["status"] in DECISIONS
+        assert body["status"] == "rejected"
+        assert "nightly_limit_exceeded" in rule_codes(body)
 
     def test_new_analysis_returns_uuid_key_known_status_and_full_metadata(self):
         status, body = RequestGenerator.POST_pix_transaction(valid_payload())
@@ -154,6 +158,9 @@ class TestPixTransactionContract:
             (["source", "geolocation"], {"latitude": -23.56, "longitude": -181}),
             (["source", "geolocation"], {"latitude": -23.56, "longitude": -46.65, "altitude": 760}),
             (["id"], "pix/000123"),
+            (["id"], "."),
+            (["id"], ".."),
+            (["id"], "-pix-000123"),
             (["id"], ""),
             (["unexpected_field"], "anything"),
             (["source_account", "unexpected_field"], "anything"),
@@ -173,6 +180,8 @@ class TestPixTransactionContract:
             (["transaction_date"], "2026-02-30T10:00:00-03:00"),
             (["transaction_date"], "2026-10-17T25:00:00-03:00"),
             (["transaction_date"], "2026-10-17T10:00:00+25:00"),
+            (["transaction_date"], "2026-10-17T10:00:00+15:00"),
+            (["transaction_date"], "2026-10-17T10:00:00-13:00"),
             (["source_account", "opening_date"], "2025-13-01T10:00:00-03:00"),
             (["destination_account", "opening_date"], "2025-04-31T10:00:00-03:00"),
         ],
@@ -222,6 +231,29 @@ class TestPixTransactionContract:
 
         assert_error(status, body, 422, "QIT001006")
         assert_nothing_was_recorded(payload["id"])
+
+    def test_latitude_that_is_not_a_number_is_refused_with_400_and_not_recorded(self):
+        payload = changed(valid_payload(), ["source", "geolocation"], {"latitude": float("nan"), "longitude": -46.65})
+
+        response = ClientRequisition.send(
+            "POST",
+            "/pix/transaction",
+            data=json.dumps(payload),
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN, "Content-Type": "application/json"},
+        )
+
+        assert_error(response.response_status, response.response_json, 400, "QIT000001")
+        assert_nothing_was_recorded(payload["id"])
+
+    def test_same_document_with_and_without_punctuation_is_the_same_payer(self):
+        transaction_date = business_hours_today()
+        payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
+        payload = pix_payload(payer, payee, transaction_date)
+        payload["source_account"]["owner"]["document_number"] = payer.document_number.replace(".", "").replace("-", "")
+
+        analysis = analyze(payload)
+
+        assert_rule_fired(analysis, "known_destination")
 
     def test_document_without_punctuation_is_accepted(self):
         payload = valid_payload()
