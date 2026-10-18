@@ -226,24 +226,50 @@ class BurstOfPix(EditablePixRule):
         return None
 
 
+def amount_compared_with_the_baseline(context) -> Optional[int]:
+    compared_amount = context.accumulated_amount_to_destination
+
+    if context.is_cold_start or compared_amount < context.policy.amount_rules_floor_cents:
+        return None
+
+    return compared_amount
+
+
+def exceeds_baseline_multiplier(compared_amount: int, setting, context) -> bool:
+    return setting.enabled and compared_amount > setting.threshold * context.baseline_amount
+
+
+def baseline_reason(compared_amount: int, setting, context) -> str:
+    return (
+        f"{brazilian_reais(compared_amount)} para o recebedor, acima de {brazilian_decimal(setting.threshold)} vezes a base de "
+        f"{brazilian_reais(context.baseline_amount)}"
+    )
+
+
+class AmountFarAboveBaseline(EditablePixRule):
+    code = "amount_far_above_baseline"
+
+    def evaluate_with(self, context, setting):
+        compared_amount = amount_compared_with_the_baseline(context)
+
+        if compared_amount is not None and exceeds_baseline_multiplier(compared_amount, setting, context):
+            return self.hit(setting.points, baseline_reason(compared_amount, setting, context))
+        return None
+
+
 class AmountAboveBaseline(EditablePixRule):
     code = "amount_above_baseline"
 
     def evaluate_with(self, context, setting):
-        compared_amount = context.accumulated_amount_to_destination
+        compared_amount = amount_compared_with_the_baseline(context)
 
-        if context.is_cold_start or compared_amount < context.policy.amount_rules_floor_cents:
+        if compared_amount is None or not exceeds_baseline_multiplier(compared_amount, setting, context):
             return None
 
-        limit = setting.threshold * context.baseline_amount
+        if exceeds_baseline_multiplier(compared_amount, context.setting(AmountFarAboveBaseline.code), context):
+            return None
 
-        if compared_amount > limit:
-            return self.hit(
-                setting.points,
-                f"{brazilian_reais(compared_amount)} para o recebedor, acima de {brazilian_decimal(setting.threshold)} vezes a base de "
-                f"{brazilian_reais(context.baseline_amount)}",
-            )
-        return None
+        return self.hit(setting.points, baseline_reason(compared_amount, setting, context))
 
 
 class MonthlyVolumeAboveTypical(EditablePixRule):
@@ -308,14 +334,20 @@ class NewDestinationAboveUsualCeiling(EditablePixRule):
     def evaluate_with(self, context, setting):
         compared_amount = context.accumulated_amount_to_destination
         reaches_the_floor = compared_amount >= context.policy.amount_rules_floor_cents
+        ceiling_multiplier = threshold_for_person_type(setting, context.pix.destination_person_type)
 
-        if context.is_new_destination and reaches_the_floor and compared_amount > context.usual_ceiling_amount:
-            return self.hit(
-                setting.points,
-                f"Destino novo recebendo {brazilian_reais(compared_amount)}, acima do teto habitual de "
-                f"{brazilian_reais(context.usual_ceiling_amount)}",
-            )
+        if context.is_new_destination and reaches_the_floor and compared_amount > ceiling_multiplier * context.usual_ceiling_amount:
+            return self.hit(setting.points, new_destination_reason(compared_amount, ceiling_multiplier, context.usual_ceiling_amount))
         return None
+
+
+def new_destination_reason(compared_amount: int, ceiling_multiplier, usual_ceiling_amount) -> str:
+    if ceiling_multiplier == 1:
+        above_the_ceiling = "acima do teto habitual"
+    else:
+        above_the_ceiling = f"acima de {brazilian_decimal(ceiling_multiplier)} vezes o teto habitual"
+
+    return f"Destino novo recebendo {brazilian_reais(compared_amount)}, {above_the_ceiling} de {brazilian_reais(usual_ceiling_amount)}"
 
 
 class DestinationReceivingFromManySources(EditablePixRule):

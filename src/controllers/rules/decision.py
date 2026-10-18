@@ -1,9 +1,11 @@
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
 
 from controllers.rules.catalog import (
     AmountAboveBaseline,
+    AmountFarAboveBaseline,
     BurstOfPix,
     ChannelUnfamiliar,
     DestinationAccountOpenedRecently,
@@ -31,7 +33,11 @@ from controllers.rules.transaction_context import TransactionContext
 
 
 SEVERITY = {"approved": 0, "two_factor_required": 1, "rejected": 2}
-DESTINATION_RELATIONSHIP_REDUCERS = (SameOwner.code, KnownDestination.code)
+REDUCED_SCORE_PARTS = {
+    LongRegisteredDevice.code: ("identity",),
+    KnownDestination.code: ("relationship",),
+    SameOwner.code: ("relationship", "amount"),
+}
 
 
 @dataclass
@@ -41,6 +47,18 @@ class AnalysisOutcome:
     risk_score: Optional[int] = None
     destination_risk: Optional[int] = None
     two_factor_expires_at: Optional[datetime] = None
+
+
+@dataclass
+class ScoreParts:
+    points: defaultdict = field(default_factory=lambda: defaultdict(int))
+    reductions: defaultdict = field(default_factory=lambda: defaultdict(int))
+
+    def capped_and_reduced(self, part: str, cap: int) -> int:
+        return max(0, min(self.points[part], cap) + self.reductions[part])
+
+    def reduced(self, part: str) -> int:
+        return max(0, self.points[part] + self.reductions[part])
 
 
 def evaluated_hits(rules: list, context: TransactionContext) -> list:
@@ -65,6 +83,7 @@ class AnalysisDecision:
             NewAccountAboveCap(),
             BurstOfPix(),
             AmountAboveBaseline(),
+            AmountFarAboveBaseline(),
             MonthlyVolumeAboveTypical(),
             DestinationAccountOpenedVeryRecently(),
             DestinationAccountOpenedRecently(),
@@ -85,7 +104,8 @@ class AnalysisDecision:
 
         scoring_hits = evaluated_hits(self.scoring_and_reducer_rules, context)
         regulatory_hits = evaluated_hits(self.regulatory_rules, context)
-        risk_score = self.risk_score(scoring_hits, context)
+        score_parts = self.score_parts(scoring_hits)
+        risk_score = self.risk_score(score_parts, context.policy)
         decision = self.score_band(risk_score, context)
 
         for regulatory_hit in regulatory_hits:
@@ -101,25 +121,33 @@ class AnalysisDecision:
             decision=decision,
             rule_hits=regulatory_hits + scoring_hits,
             risk_score=risk_score,
-            destination_risk=self.destination_risk(scoring_hits),
+            destination_risk=self.destination_risk(score_parts),
             two_factor_expires_at=two_factor_expires_at,
         )
 
-    def risk_score(self, scoring_hits: list, context: TransactionContext) -> int:
-        family_points = {}
-        reducer_points = 0
+    def score_parts(self, scoring_hits: list) -> ScoreParts:
+        parts = ScoreParts()
 
         for rule_hit in scoring_hits:
             rule = self.rules_by_code[rule_hit.code]
             if rule.kind == "reducer":
-                reducer_points += rule_hit.points
+                for part in REDUCED_SCORE_PARTS[rule.code]:
+                    parts.reductions[part] += rule_hit.points
             else:
-                family_points[rule.family] = family_points.get(rule.family, 0) + rule_hit.points
+                parts.points[rule.counterparty_signal or rule.family] += rule_hit.points
 
-        capped_points = sum(
-            min(points, getattr(context.policy, f"{family}_family_cap")) for family, points in family_points.items()
-        )
-        return max(0, capped_points + reducer_points)
+        return parts
+
+    @staticmethod
+    def risk_score(parts: ScoreParts, policy) -> int:
+        identity = parts.capped_and_reduced("identity", policy.identity_family_cap)
+        velocity = parts.capped_and_reduced("velocity", policy.velocity_family_cap)
+        amount = parts.capped_and_reduced("amount", policy.amount_family_cap)
+        relationship = parts.capped_and_reduced("relationship", policy.counterparty_relationship_cap)
+        counterparty = min(relationship + parts.points["base"], policy.counterparty_family_cap)
+        base_evidence = counterparty - relationship
+        behavior = min(velocity + amount + relationship, policy.behavior_score_cap)
+        return identity + behavior + base_evidence
 
     @staticmethod
     def score_band(risk_score: int, context: TransactionContext) -> str:
@@ -131,15 +159,6 @@ class AnalysisDecision:
 
         return "approved"
 
-    def destination_risk(self, scoring_hits: list) -> int:
-        relationship_points = 0
-        base_points = 0
-
-        for rule_hit in scoring_hits:
-            rule = self.rules_by_code[rule_hit.code]
-            if rule.counterparty_signal == "relationship" or rule.code in DESTINATION_RELATIONSHIP_REDUCERS:
-                relationship_points += rule_hit.points
-            elif rule.counterparty_signal == "base":
-                base_points += rule_hit.points
-
-        return max(0, relationship_points) + base_points
+    @staticmethod
+    def destination_risk(parts: ScoreParts) -> int:
+        return parts.reduced("relationship") + parts.points["base"]

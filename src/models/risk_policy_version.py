@@ -23,6 +23,8 @@ class RiskPolicyVersion(Base):
         "velocity_family_cap",
         "amount_family_cap",
         "counterparty_family_cap",
+        "counterparty_relationship_cap",
+        "behavior_score_cap",
         "two_factor_score_threshold",
         "rejection_score_threshold",
         "two_factor_validity_minutes",
@@ -50,6 +52,8 @@ class RiskPolicyVersion(Base):
     velocity_family_cap = Column(Integer, nullable=False)
     amount_family_cap = Column(Integer, nullable=False)
     counterparty_family_cap = Column(Integer, nullable=False)
+    counterparty_relationship_cap = Column(Integer, nullable=False)
+    behavior_score_cap = Column(Integer, nullable=False)
     two_factor_score_threshold = Column(Integer, nullable=False)
     rejection_score_threshold = Column(Integer, nullable=False)
     two_factor_validity_minutes = Column(Integer, nullable=False)

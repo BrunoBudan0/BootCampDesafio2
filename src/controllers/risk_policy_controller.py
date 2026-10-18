@@ -152,6 +152,12 @@ class RiskPolicyController(BaseController):
                 "O limiar de reprovação precisa ser maior que o limiar de 2FA.",
             )
 
+        if version.counterparty_relationship_cap > version.counterparty_family_cap:
+            raise InconsistentRiskPolicy(
+                "The relationship cap cannot be greater than the counterparty family cap.",
+                "O teto da relação não pode ser maior que o teto da família contraparte.",
+            )
+
         for code, setting in settings_by_code.items():
             if setting.rule.kind == "scoring" and setting.points < 0:
                 raise InconsistentRiskPolicy(
@@ -172,6 +178,15 @@ class RiskPolicyController(BaseController):
             raise InconsistentRiskPolicy(
                 "The very recent destination account range must be shorter than the recent destination account range.",
                 "A faixa de conta de destino muito recente precisa ser menor que a de conta de destino recente.",
+            )
+
+        amount_multiplier = settings_by_code["amount_above_baseline"].threshold
+        far_amount_multiplier = settings_by_code["amount_far_above_baseline"].threshold
+
+        if far_amount_multiplier <= amount_multiplier:
+            raise InconsistentRiskPolicy(
+                "The far above baseline multiplier must be greater than the above baseline multiplier.",
+                "O multiplicador do valor muito fora do padrão precisa ser maior que o do valor fora do padrão.",
             )
 
         monthly_volume_window_minutes = settings_by_code["monthly_volume_above_typical"].window_minutes

@@ -88,16 +88,20 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Código da regra | `rule.code` | Nome da regra em inglês. Aparece no código, no `metadata` e no README | |
 | Tipo de regra | `rule.kind` | `scoring`, `reducer`, `eliminatory` ou `regulatory` | Família |
 | Regra de pontuação | `scoring` | Soma pontos na pontuação de risco | |
-| Redutor | `reducer` | Tira pontos da pontuação de risco | |
+| Redutor | `reducer` | Tira pontos só da parte da pontuação que ele desmente: o aparelho cadastrado tira da identidade, o destino conhecido tira dos sinais da relação, e a mesma titularidade tira dos sinais da relação e do valor | |
 | Regra eliminatória | `eliminatory` | Decide direto, sem passar pela pontuação. O banco pode editar | Regra regulatória |
 | Regra regulatória | `regulatory` | Vem de norma do BCB. Os valores ficam fixos no código e o banco não edita | Regra eliminatória |
 | Decisão forçada | `forced_decision` | A decisão que uma regra eliminatória ou regulatória impõe quando dispara | |
 | Família | `rule.family` | Grupo das regras de pontuação: `identity` (identidade), `velocity` (tempo), `amount` (valor), `counterparty` (contraparte) | Tipo de regra |
-| Teto da família | `*_family_cap` | Máximo de pontos que uma família soma numa análise | |
+| Teto da família | `*_family_cap` | Máximo de pontos que uma família soma numa análise. A contraparte tem teto alto (70) porque só a evidência da base pode chegar até ele | |
+| Teto da relação | `counterparty_relationship_cap` | Máximo de pontos que os sinais da relação somam dentro da contraparte (30). Impede que relação somada a um único sinal da base reprove, como numa vaquinha para uma conta nova | Teto da família |
+| Comportamento | (velocidade, valor e relação) | O que o próprio pagador está fazendo de diferente: conta nova, rajada, valor fora do padrão, destino novo, conta de destino recente. É atipicidade, não evidência | Evidência |
+| Evidência | (identidade e base) | Dúvida sobre quem está pagando, ou o que a base inteira viu do recebedor. Só ela, uma regra eliminatória ou o limite noturno reprovam no modelo equilibrado | Comportamento |
+| Teto do comportamento | `behavior_score_cap` | Máximo que velocidade, valor e relação somam juntos na pontuação de risco (65 no modelo equilibrado). Abaixo do limiar de reprovação, para comportamento atípico sozinho chegar no máximo ao 2FA | Teto da família |
 | Regra disparada | `rule_hit` | Regra que deu positivo numa análise, com os pontos e o motivo | |
 | Motivo | `reason` | Frase que explica o disparo com o valor observado | |
 | Pontos | `points` | Quanto uma regra disparada soma ou tira | Pontuação de risco |
-| Pontuação de risco | `risk_score` | Soma dos pontos de cada família, cada uma limitada ao seu teto, menos os redutores. Nunca fica abaixo de zero | Credibilidade |
+| Pontuação de risco | `risk_score` | Identidade, mais comportamento, mais a parte da base na contraparte. Cada família é limitada ao seu teto e perde os redutores que a desmentem, sem ficar abaixo de zero. Os sinais da relação têm o teto da relação; velocidade, valor e relação juntos têm o teto do comportamento | Credibilidade |
 | Limiar de 2FA | `two_factor_score_threshold` | Pontuação a partir da qual o motor pede 2FA (40) | |
 | Limiar de reprovação | `rejection_score_threshold` | Pontuação a partir da qual o motor reprova (70) | |
 | Severidade | (ordem) | `rejected` > `two_factor_required` > `approved`. A decisão final é a mais severa entre a faixa da pontuação de risco e as decisões forçadas | |
@@ -107,7 +111,8 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Ticket médio de referência | `reference_average_ticket_*` | Ticket médio do Pix publicado pelo BCB para cada par pagador → recebedor (PF→PF R$ 268,64; PF→PJ R$ 112,42; PJ→PF R$ 549,58; PJ→PJ R$ 5.404,53). É uma média, não uma mediana | Mediana da população |
 | Mediana da população | `population_median_amount` | Mediana dos Pix aceitos de todos os pagadores com o mesmo par pagador → recebedor, misturada com o ticket médio de referência pela credibilidade | Ticket médio de referência |
 | Base de comparação | `baseline_amount` | (n × mediana do pagador + k × mediana da população) / (n + k) | |
-| Valor fora do padrão | `amount_above_baseline` | Pix acima do multiplicador vezes a base de comparação | |
+| Valor fora do padrão | `amount_above_baseline` | Pix acima do multiplicador vezes a base de comparação (5 vezes) | Valor muito fora do padrão |
+| Valor muito fora do padrão | `amount_far_above_baseline` | Pix acima de um multiplicador maior da base de comparação (20 vezes). Pesa mais e é exclusiva com a anterior: dispara só a mais grave | Valor fora do padrão |
 | Piso das regras de valor | `amount_rules_floor_cents` | Abaixo dele, as regras da família valor não pontuam (R$ 100) | |
 | Teto de conta nova | `new_account_cap_*` | Maior Pix que uma conta nova faz sem fricção (PF R$ 1.000, PJ R$ 10.000) | Limite regulatório |
 | Teto habitual | `usual_ceiling_amount` | O maior entre a base de comparação e o maior Pix aceito do pagador na janela de histórico, sem contar Pix para conta própria nem os aceitos na janela de curto prazo | Teto de conta nova |
@@ -125,7 +130,7 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 | Fan-in | `destination_receiving_from_many_sources` | Recebedor PF que recebe Pix a partir do piso das regras de valor de muitos pagadores diferentes em pouco tempo | |
 | Recebedor com reprovações | `destination_rejected_for_other_sources` | Recebedor com 2FA recusados, ou com Pix reprovados em que disparou alguma regra de contraparte, vindos de outros pagadores em pouco tempo. Só soma risco e ignora as análises em que ela mesma disparou | |
 | Recebedor em várias contas | `destination_document_in_many_accounts` | Mesmo documento de recebedor recebendo em várias contas de destino diferentes em pouco tempo. Recebedor PJ tem um limite próprio, bem maior | |
-| Limite de PJ | `company_threshold` | Limite próprio de uma regra para pessoa jurídica: o recebedor PJ em `destination_document_in_many_accounts` e o pagador PJ em `burst_of_pix`. O banco muda criando uma versão nova da política | |
+| Limite de PJ | `company_threshold` | Limite próprio de uma regra para pessoa jurídica: o recebedor PJ em `destination_document_in_many_accounts` e em `new_destination_above_usual_ceiling`, e o pagador PJ em `burst_of_pix`. O banco muda criando uma versão nova da política | |
 | Alcance do sinal | `rule.counterparty_signal`: `relationship`, `base` | Diz se uma regra de contraparte depende só deste pagador ou de todos os pagadores da instalação | Família |
 | Sinal da relação | `relationship` | Regra de contraparte que depende do que este pagador sabe do recebedor: idade da conta de destino e destino novo acima do teto habitual. Os redutores abatem | Sinal da base |
 | Sinal da base | `base` | Regra de contraparte que depende do que todos os pagadores da instalação viram do recebedor: fan-in, recebedor com reprovações e recebedor em várias contas. Os redutores não abatem, porque o que um pagador sabe do recebedor não apaga o que a base inteira viu | Sinal da relação |

@@ -73,11 +73,12 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | `two_factor_denied_recently` | Alguma confirmação `denied` de análise do pagador com `confirmed_at` em `(T menos 24 h, T]` |
 | `new_account_above_cap` | Conta nova e valor acumulado no total `>` teto de conta nova (PF R$ 1.000, PJ R$ 10.000) |
 | `burst_of_pix` | Tentativas do pagador em `(T menos 5 min, T]`, contando a atual, `>= 5` para PF e `>= 50` para PJ, que paga em lote |
-| `amount_above_baseline` | Fora do início frio, valor acumulado no recebedor `>=` piso das regras de valor e `>` multiplicador × base de comparação |
+| `amount_above_baseline` | Fora do início frio, valor acumulado no recebedor `>=` piso das regras de valor e `>` multiplicador × base de comparação, sem `amount_far_above_baseline` |
+| `amount_far_above_baseline` | Fora do início frio, valor acumulado no recebedor `>=` piso das regras de valor e `>` multiplicador maior (20) × base de comparação |
 | `monthly_volume_above_typical` | Fora do início frio, período de referência pelo menos do tamanho da janela da regra, volume do mês atual `>=` piso e `> 3 ×` volume mensal típico |
 | `destination_account_opened_very_recently` | Conta de destino com menos de 7 dias. Vale 25 pontos, abaixo do limiar de alerta: sozinha não gera alerta |
 | `destination_account_opened_recently` | Conta de destino com menos de 30 dias e sem a regra anterior |
-| `new_destination_above_usual_ceiling` | Documento do recebedor ausente dos Pix aceitos do pagador anteriores à janela de curto prazo (destino novo) e valor acumulado no recebedor `>=` piso das regras de valor e `>` teto habitual. Pix aceitos nas últimas 24 h ainda não tornam o destino conhecido, para o fracionamento num destino novo não escapar |
+| `new_destination_above_usual_ceiling` | Documento do recebedor ausente dos Pix aceitos do pagador anteriores à janela de curto prazo (destino novo) e valor acumulado no recebedor `>=` piso das regras de valor e `>` 1 × teto habitual (recebedor PJ: 3 ×). Pix aceitos nas últimas 24 h ainda não tornam o destino conhecido, para o fracionamento num destino novo não escapar |
 | `destination_receiving_from_many_sources` | Recebedor PF e documentos de pagador distintos nas tentativas para o mesmo documento de recebedor em `(T menos 1 h, T]` com valor `>=` piso das regras de valor, contando o atual se ele também atingir o piso, `>= 5` |
 | `destination_rejected_for_other_sources` | Documentos de outros pagadores com análise para o mesmo documento de recebedor em `(T menos 7 dias, T]` que teve 2FA recusado, ou que foi reprovada tendo entre as disparadas alguma regra da família contraparte ou `new_account_to_new_destination_far_above_cap`, `>= 2`. Análises em que esta regra disparou nunca contam. Reprovação só por sinal do pagador (limite noturno, aparelho compartilhado, viagem impossível) não conta |
 | `destination_document_in_many_accounts` | Contas de destino distintas (participante, agência e número) nas tentativas para o mesmo documento de recebedor em `(T menos 24 h, T]`, contando a atual, `>= 3` para PF e `>= 10` para PJ |
@@ -95,7 +96,11 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 ### Decisão
 
 1. Regras eliminatórias. Se alguma dispara, só elas são gravadas, a decisão é `rejected`, e `risk_score` e `destination_risk` ficam nulos.
-2. Pontuação de risco: soma de cada família limitada ao teto, mais os redutores (negativos), nunca abaixo de zero. Faixa: `< 40` aprova, `40 a 69` pede 2FA, `>= 70` reprova.
+2. Pontuação de risco: identidade + comportamento + parte da base.
+   - Cada família é limitada ao teto e perde os redutores que a desmentem, sem ficar abaixo de zero: `long_registered_device` abate a identidade, `known_destination` abate os sinais da relação, `same_owner` abate os sinais da relação e o valor.
+   - Comportamento = min(velocidade + valor + relação, 65), com a relação limitada antes a 30.
+   - Parte da base = min(relação + sinais da base, 70) menos a relação.
+   - Faixa: `< 40` aprova, `40 a 69` pede 2FA, `>= 70` reprova.
 3. Regras regulatórias: o limite noturno força `rejected` e o limite do aparelho força no mínimo `two_factor_required`. Elas entram com 0 ponto.
 4. Vale a decisão mais severa entre a faixa e as decisões forçadas.
 5. Risco do recebedor: `max(0, sinais da relação + same_owner + known_destination) + sinais da base`, sem teto. Os sinais da relação são as regras com `counterparty_signal = relationship` (idade da conta de destino e destino novo acima do teto habitual); os da base são as com `base` (fan-in, reprovações de outros pagadores e várias contas). A partir de 30 sai um alerta.
@@ -157,7 +162,7 @@ Devolve a análise inteira no mesmo formato acima, já com o resultado em `two_f
 }
 ```
 
-`parameters` traz os 20 parâmetros, e `rules` traz as 21 regras editáveis (as regulatórias ficam de fora). `GET /risk-policy/templates` devolve `{"templates": [...]}` com os três modelos nesse mesmo formato.
+`parameters` traz os 22 parâmetros, e `rules` traz as 22 regras editáveis (as regulatórias ficam de fora). `GET /risk-policy/templates` devolve `{"templates": [...]}` com os três modelos nesse mesmo formato.
 
 O `POST` herda tudo da versão vigente da política do banco, ou do modelo pedido em `based_on_template`, e aplica por cima o que veio em `parameters` e `rules`.
 
@@ -187,7 +192,7 @@ Todo erro tem o corpo `{title, description, translation, code}`.
 | QIT001013 | 422 | Tentativa de editar uma regra regulatória | Edição da política |
 | QIT001014 | 422 | Ajuste que a regra não usa (janela, limite, limite de PJ ou pontos numa regra sem esse ajuste), limite com mais de 2 casas decimais, ou limite fracionado em regra de unidade `count` ou `days` | Edição da política |
 | QIT001015 | 422 | A mesma regra repetida na edição | Edição da política |
-| QIT001016 | 422 | Política resultante incoerente: reprovação `<=` 2FA, pontos negativos em regra de pontuação, pontos positivos em redutor, faixa de 7 dias `>=` faixa de 30 dias, janela do volume mensal `>=` janela de histórico | Edição da política |
+| QIT001016 | 422 | Política resultante incoerente: reprovação `<=` 2FA, pontos negativos em regra de pontuação, pontos positivos em redutor, faixa de 7 dias `>=` faixa de 30 dias, janela do volume mensal `>=` janela de histórico, teto da relação acima do teto da contraparte, multiplicador do valor muito fora do padrão `<=` o do valor fora do padrão | Edição da política |
 | QIT001017 | 409 | Duas edições simultâneas tentaram criar a mesma versão | Edição da política |
 
 **Por que 400 e 422 são diferentes:** 400 quer dizer "não consegui ler o pedido", e é o schema que decide. 422 quer dizer "li, entendi, e o valor não pode existir": um CPF com o formato certo e o dígito errado, ou uma data que passa no padrão e não existe no calendário. É a mesma separação do Base Service (`InvalidDocumentNumber` e `InvalidBirthdate`).
@@ -247,7 +252,7 @@ O documento vem no caminho e é validado no código: precisa ser um CPF válido 
 |---|---|---|
 | `change_reason` | Obrigatório, até 255, com pelo menos um caractere que não seja espaço | Toda versão precisa dizer por que existe (auditoria e LGPD, art. 20) |
 | `based_on_template` | Opcional: `conservative`, `balanced` ou `permissive` | É assim que o banco troca de modelo de partida |
-| `parameters` | Opcional; só os 20 parâmetros conhecidos, cada um inteiro dentro de uma faixa | Parâmetro desconhecido é 400 porque não existe. As faixas barram valores sem sentido (janela de 0 dias). A coerência entre parâmetros fica no código (422) |
+| `parameters` | Opcional; só os 22 parâmetros conhecidos, cada um inteiro dentro de uma faixa | Parâmetro desconhecido é 400 porque não existe. As faixas barram valores sem sentido (janela de 0 dias). A coerência entre parâmetros fica no código (422) |
 | `rules` | Opcional; até 50 itens com `code` obrigatório e pelo menos um ajuste (`enabled`, `points` de -100 a 100, `threshold > 0`, `window_minutes >= 1`, `company_threshold > 0`) | Um item só com o código não ajusta nada. Qual ajuste cada regra aceita depende do catálogo e é conferido no código (422) |
 
 Os valores regulatórios (R$ 1.000 da noite, R$ 200 e R$ 1.000 do aparelho) não aparecem em nenhum schema: não há como editá-los.
@@ -256,9 +261,9 @@ Os valores regulatórios (R$ 1.000 da noite, R$ 200 e R$ 1.000 do aparelho) não
 
 O `database/database.sql` cria as tabelas da modelagem, a VIEW `accepted_pix`, um gatilho comum (`refuse_change`) que recusa UPDATE, DELETE e TRUNCATE em todas as tabelas, e a carga inicial:
 - as 3 decisões;
-- as 23 regras do catálogo;
+- as 24 regras do catálogo;
 - os 3 modelos e a política do banco;
-- os 84 ajustes de regra (21 por versão).
+- os 88 ajustes de regra (22 por versão).
 
 O banco foi validado à parte, numa transação desfeita no fim, com 32 conferências. Todas passaram:
 - a política do banco é cópia exata do modelo equilibrado;

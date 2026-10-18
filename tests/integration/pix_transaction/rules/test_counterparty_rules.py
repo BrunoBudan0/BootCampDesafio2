@@ -89,13 +89,29 @@ class TestNewDestinationAboveUsualCeiling:
             )
         return payer, payee
 
-    def test_new_destination_above_the_largest_accepted_pix_adds_25_points(self):
+    def test_new_destination_above_the_largest_accepted_pix_adds_30_points(self):
         transaction_date = business_hours_today()
         payer, _ = self.history_with_ceiling_of_300_reais(transaction_date)
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 30001))
 
-        assert rule_hit(analysis, "new_destination_above_usual_ceiling")["points"] == 25
+        assert rule_hit(analysis, "new_destination_above_usual_ceiling")["points"] == 30
+
+    def test_new_company_destination_within_three_times_the_ceiling_is_not_suspicious(self):
+        transaction_date = business_hours_today()
+        payer, _ = self.history_with_ceiling_of_300_reais(transaction_date)
+
+        analysis = analyze(pix_payload(payer, new_company_payee(), transaction_date, 90000))
+
+        assert_rule_not_fired(analysis, "new_destination_above_usual_ceiling")
+
+    def test_new_company_destination_above_three_times_the_ceiling_adds_points(self):
+        transaction_date = business_hours_today()
+        payer, _ = self.history_with_ceiling_of_300_reais(transaction_date)
+
+        analysis = analyze(pix_payload(payer, new_company_payee(), transaction_date, 90001))
+
+        assert_rule_fired(analysis, "new_destination_above_usual_ceiling")
 
     def test_new_destination_at_the_largest_accepted_pix_is_within_the_ceiling(self):
         transaction_date = business_hours_today()

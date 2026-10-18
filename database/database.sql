@@ -60,6 +60,8 @@ CREATE TABLE risk_policy_version(
     velocity_family_cap                                         INTEGER NOT NULL,
     amount_family_cap                                           INTEGER NOT NULL,
     counterparty_family_cap                                     INTEGER NOT NULL,
+    counterparty_relationship_cap                               INTEGER NOT NULL,
+    behavior_score_cap                                          INTEGER NOT NULL,
     two_factor_score_threshold                                  INTEGER NOT NULL,
     rejection_score_threshold                                   INTEGER NOT NULL,
     two_factor_validity_minutes                                 INTEGER NOT NULL,
@@ -80,6 +82,8 @@ CREATE TABLE risk_policy_version(
     CONSTRAINT ck_risk_policy_version_amount_rules_floor CHECK (amount_rules_floor_cents >= 0),
     CONSTRAINT ck_risk_policy_version_new_account CHECK (new_account_age_days > 0 AND new_account_cap_individual_cents > 0 AND new_account_cap_company_cents > 0),
     CONSTRAINT ck_risk_policy_version_positive_family_caps CHECK (identity_family_cap > 0 AND velocity_family_cap > 0 AND amount_family_cap > 0 AND counterparty_family_cap > 0),
+    CONSTRAINT ck_risk_policy_version_relationship_cap CHECK (counterparty_relationship_cap > 0 AND counterparty_relationship_cap <= counterparty_family_cap),
+    CONSTRAINT ck_risk_policy_version_behavior_score_cap CHECK (behavior_score_cap > 0),
     CONSTRAINT ck_risk_policy_version_score_thresholds CHECK (two_factor_score_threshold > 0 AND rejection_score_threshold > two_factor_score_threshold),
     CONSTRAINT ck_risk_policy_version_destination_alert_threshold CHECK (destination_alert_threshold > 0)
 );
@@ -284,10 +288,11 @@ FROM (VALUES
     ('new_account_above_cap', 'scoring', 'velocity', NULL, NULL, NULL, false, false, 'Conta de origem nova pagando acima do teto de conta nova.'),
     ('burst_of_pix', 'scoring', 'velocity', NULL, NULL, 'count', true, true, 'Muitos Pix do mesmo pagador em poucos minutos. Pagador PJ tem limite próprio, porque paga em lote.'),
     ('amount_above_baseline', 'scoring', 'amount', NULL, NULL, 'multiplier', false, false, 'Pix acima do multiplicador vezes a base de comparação do par pagador e recebedor.'),
+    ('amount_far_above_baseline', 'scoring', 'amount', NULL, NULL, 'multiplier', false, false, 'Pix muito acima da base de comparação do par pagador e recebedor. Exclusiva com o valor fora do padrão: dispara só a mais grave.'),
     ('monthly_volume_above_typical', 'scoring', 'amount', NULL, NULL, 'multiplier', true, false, 'Volume do mês acima do volume mensal típico do pagador.'),
     ('destination_account_opened_very_recently', 'scoring', 'counterparty', 'relationship', NULL, 'days', false, false, 'Conta de destino aberta há muito pouco tempo.'),
     ('destination_account_opened_recently', 'scoring', 'counterparty', 'relationship', NULL, 'days', false, false, 'Conta de destino aberta há poucos dias.'),
-    ('new_destination_above_usual_ceiling', 'scoring', 'counterparty', 'relationship', NULL, NULL, false, false, 'Destino novo recebendo acima do teto habitual do pagador, a partir do piso das regras de valor.'),
+    ('new_destination_above_usual_ceiling', 'scoring', 'counterparty', 'relationship', NULL, 'multiplier', false, true, 'Destino novo recebendo acima de um múltiplo do teto habitual do pagador, a partir do piso das regras de valor. Recebedor PJ tem múltiplo próprio, para a primeira compra numa loja não parecer golpe.'),
     ('destination_receiving_from_many_sources', 'scoring', 'counterparty', 'base', NULL, 'count', true, false, 'Recebedor PF recebendo, a partir do piso das regras de valor, de muitos pagadores diferentes em pouco tempo.'),
     ('destination_rejected_for_other_sources', 'scoring', 'counterparty', 'base', NULL, 'count', true, false, 'Recebedor com 2FA recusados, ou Pix reprovados com regra de contraparte, de outros pagadores.'),
     ('destination_document_in_many_accounts', 'scoring', 'counterparty', 'base', NULL, 'count', true, true, 'Mesmo documento de recebedor recebendo em várias contas de destino diferentes.'),
@@ -323,6 +328,8 @@ INSERT INTO risk_policy_version (
     velocity_family_cap,
     amount_family_cap,
     counterparty_family_cap,
+    counterparty_relationship_cap,
+    behavior_score_cap,
     two_factor_score_threshold,
     rejection_score_threshold,
     two_factor_validity_minutes,
@@ -338,16 +345,19 @@ SELECT
     26864, 11242, 54958, 540453,
     10000,
     30, 100000, 1000000,
-    50, 40, 35, 40,
-    40, 70,
-    10,
+    50, 40, 35, 70,
     30,
+    template.behavior_score_cap,
+    template.two_factor_score_threshold,
+    template.rejection_score_threshold,
+    10,
+    template.destination_alert_threshold,
     1440
 FROM (VALUES
-    ('conservative', 'Modelo conservador'),
-    ('balanced', 'Modelo equilibrado'),
-    ('permissive', 'Modelo permissivo')
-) AS template(name, change_reason)
+    ('conservative', 'Modelo conservador', 105, 35, 60, 25),
+    ('balanced', 'Modelo equilibrado', 65, 40, 70, 30),
+    ('permissive', 'Modelo permissivo', 75, 45, 80, 35)
+) AS template(name, change_reason, behavior_score_cap, two_factor_score_threshold, rejection_score_threshold, destination_alert_threshold)
 JOIN risk_policy ON risk_policy.name = template.name;
 
 INSERT INTO risk_policy_version (
@@ -370,6 +380,8 @@ INSERT INTO risk_policy_version (
     velocity_family_cap,
     amount_family_cap,
     counterparty_family_cap,
+    counterparty_relationship_cap,
+    behavior_score_cap,
     two_factor_score_threshold,
     rejection_score_threshold,
     two_factor_validity_minutes,
@@ -396,6 +408,8 @@ SELECT
     balanced_version.velocity_family_cap,
     balanced_version.amount_family_cap,
     balanced_version.counterparty_family_cap,
+    balanced_version.counterparty_relationship_cap,
+    balanced_version.behavior_score_cap,
     balanced_version.two_factor_score_threshold,
     balanced_version.rejection_score_threshold,
     balanced_version.two_factor_validity_minutes,
@@ -412,7 +426,11 @@ SELECT
     rule.id,
     true,
     setting.points,
-    CASE WHEN rule.code = 'amount_above_baseline' THEN policy_multiplier.amount_above_baseline_multiplier ELSE setting.threshold END,
+    CASE rule.code
+        WHEN 'amount_above_baseline' THEN policy_multiplier.amount_above_baseline_multiplier
+        WHEN 'amount_far_above_baseline' THEN policy_multiplier.amount_far_above_baseline_multiplier
+        ELSE setting.threshold
+    END,
     setting.window_minutes,
     setting.company_threshold
 FROM (VALUES
@@ -427,10 +445,11 @@ FROM (VALUES
     ('new_account_above_cap', 40, NULL, NULL, NULL),
     ('burst_of_pix', 25, 5, 5, 50),
     ('amount_above_baseline', 25, NULL, NULL, NULL),
+    ('amount_far_above_baseline', 35, NULL, NULL, NULL),
     ('monthly_volume_above_typical', 20, 3, 43200, NULL),
     ('destination_account_opened_very_recently', 25, 7, NULL, NULL),
     ('destination_account_opened_recently', 20, 30, NULL, NULL),
-    ('new_destination_above_usual_ceiling', 25, NULL, NULL, NULL),
+    ('new_destination_above_usual_ceiling', 30, 1, NULL, 3),
     ('destination_receiving_from_many_sources', 30, 5, 60, NULL),
     ('destination_rejected_for_other_sources', 20, 2, 10080, NULL),
     ('destination_document_in_many_accounts', 30, 3, 1440, 10),
@@ -442,8 +461,8 @@ JOIN rule ON rule.code = setting.code
 CROSS JOIN risk_policy_version
 JOIN risk_policy ON risk_policy.id = risk_policy_version.risk_policy_id
 JOIN (VALUES
-    ('conservative', 3::NUMERIC),
-    ('balanced', 5::NUMERIC),
-    ('permissive', 10::NUMERIC),
-    ('bank', 5::NUMERIC)
-) AS policy_multiplier(policy_name, amount_above_baseline_multiplier) ON policy_multiplier.policy_name = risk_policy.name;
+    ('conservative', 3::NUMERIC, 10::NUMERIC),
+    ('balanced', 5::NUMERIC, 20::NUMERIC),
+    ('permissive', 10::NUMERIC, 40::NUMERIC),
+    ('bank', 5::NUMERIC, 20::NUMERIC)
+) AS policy_multiplier(policy_name, amount_above_baseline_multiplier, amount_far_above_baseline_multiplier) ON policy_multiplier.policy_name = risk_policy.name;

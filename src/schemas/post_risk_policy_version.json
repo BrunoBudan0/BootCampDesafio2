@@ -32,6 +32,8 @@
                 "velocity_family_cap": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "amount_family_cap": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "counterparty_family_cap": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "counterparty_relationship_cap": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "behavior_score_cap": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "two_factor_score_threshold": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "rejection_score_threshold": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "two_factor_validity_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},

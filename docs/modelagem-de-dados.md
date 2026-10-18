@@ -97,7 +97,9 @@ Os parâmetros da política, um por coluna, para cada um ter tipo e CHECK própr
 | `identity_family_cap` | INTEGER | > 0 | 50 |
 | `velocity_family_cap` | INTEGER | > 0 | 40 |
 | `amount_family_cap` | INTEGER | > 0 | 35 |
-| `counterparty_family_cap` | INTEGER | > 0 | 40 |
+| `counterparty_family_cap` | INTEGER | > 0 | 70 |
+| `counterparty_relationship_cap` | INTEGER | > 0 e <= `counterparty_family_cap` | 30 |
+| `behavior_score_cap` | INTEGER | > 0 | 65 |
 | `two_factor_score_threshold` | INTEGER | > 0 | 40 |
 | `rejection_score_threshold` | INTEGER | > `two_factor_score_threshold` | 70 |
 | `two_factor_validity_minutes` | INTEGER | > 0 | 10 |
@@ -232,10 +234,11 @@ Análises com decisão `approved`, mais as com decisão `two_factor_required` e 
 | `new_account_above_cap` | pontuação | tempo | 40 | | |
 | `burst_of_pix` | pontuação | tempo | 25 | 5 Pix; pagador PJ: 50 | 5 min |
 | `amount_above_baseline` | pontuação | valor | 25 | 5 × base de comparação | |
+| `amount_far_above_baseline` | pontuação | valor | 35 | 20 × base de comparação | |
 | `monthly_volume_above_typical` | pontuação | valor | 20 | 3 × volume mensal típico | 30 dias |
 | `destination_account_opened_very_recently` | pontuação | contraparte (relação) | 25 | 7 dias | |
 | `destination_account_opened_recently` | pontuação | contraparte (relação) | 20 | 30 dias | |
-| `new_destination_above_usual_ceiling` | pontuação | contraparte (relação) | 25 | a partir do piso das regras de valor | |
+| `new_destination_above_usual_ceiling` | pontuação | contraparte (relação) | 30 | 1 × teto habitual; recebedor PJ: 3 ×; a partir do piso das regras de valor | |
 | `destination_receiving_from_many_sources` | pontuação | contraparte (base) | 30 | 5 pagadores com Pix a partir do piso das regras de valor, só recebedor PF | 1 h |
 | `destination_rejected_for_other_sources` | pontuação | contraparte (base) | 20 | 2 outros pagadores com 2FA recusado ou reprovação com regra de contraparte | 7 dias |
 | `destination_document_in_many_accounts` | pontuação | contraparte (base) | 30 | 3 contas de destino; recebedor PJ: 10 | 24 h |
@@ -252,6 +255,8 @@ Regras de convivência:
 - `destination_account_opened_very_recently` vale 25, abaixo do limiar de alerta: conta de destino nova sozinha não gera alerta, mas gera com qualquer outro sinal.
 - `destination_rejected_for_other_sources` só soma risco e nunca reprova sozinha. Conta os 2FA recusados e os Pix reprovados em que disparou alguma regra de contraparte ou `new_account_to_new_destination_far_above_cap`. Reprovação por motivo só do pagador (limite noturno, dispositivo compartilhado, viagem impossível) não diz nada sobre o recebedor e fica de fora. Ignora as análises em que ela mesma disparou, para não se realimentar.
 - `destination_receiving_from_many_sources` só conta pagadores cujo Pix atingiu `amount_rules_floor_cents`, para racha de conta e vaquinha de valor baixo não parecerem conta laranja.
+- `amount_above_baseline` e `amount_far_above_baseline` são exclusivas: dispara só a mais grave. O multiplicador da segunda precisa ser maior que o da primeira.
+- `new_destination_above_usual_ceiling` vale 30, acima do limiar de alerta: destino novo bem acima do teto habitual gera alerta sozinho, que é o que a vítima de falsa central precisa ver. Para recebedor PJ, o limite é 3 vezes o teto, para a primeira compra numa loja não gerar alerta à toa.
 - Risco do recebedor: os redutores abatem só os sinais da relação (`counterparty_signal = 'relationship'`). Os sinais da base (`counterparty_signal = 'base'`) entram inteiros. `destination_risk = max(0, sinais da relação - mesma titularidade - destino conhecido) + sinais da base`.
 - O limite de PJ fica em `company_threshold`: o recebedor PJ em `destination_document_in_many_accounts` e o pagador PJ em `burst_of_pix`, porque empresa paga em lote. O banco muda criando uma versão nova da política.
 - `device_used_by_many_sources` conta só pagadores PF: empresas que pagam pelo mesmo computador, como um escritório de contabilidade, não são uma fazenda de aparelhos.
@@ -259,19 +264,34 @@ Regras de convivência:
 - O teto habitual nunca fica abaixo da base de comparação e ignora os Pix para conta própria e os aceitos na janela de curto prazo.
 - Valor acumulado de cada regra de valor (princípio 8):
   - total do pagador: `new_account_above_cap`, `nightly_limit_exceeded` (soma da noite) e `unregistered_device_limit_exceeded` (soma do dia no mesmo dispositivo);
-  - para o mesmo recebedor: `amount_above_baseline`, `new_destination_above_usual_ceiling` e `new_account_to_new_destination_far_above_cap`;
+  - para o mesmo recebedor: `amount_above_baseline`, `amount_far_above_baseline`, `new_destination_above_usual_ceiling` e `new_account_to_new_destination_far_above_cap`;
   - o piso das regras de valor também é comparado com o acumulado, para dez Pix de R$ 99 não escaparem dele, e vale também para `new_destination_above_usual_ceiling`.
 
 ## Como as regras viram decisão
 
 1. Regras eliminatórias. Se alguma dispara, as que dispararam são gravadas, a decisão é `rejected` e a análise termina aqui. `risk_score` e `destination_risk` ficam nulos.
-2. Regras de pontuação e redutores. Pontuação de risco = soma de cada família limitada ao seu teto, menos os redutores, nunca abaixo de zero. A faixa sai dos limiares da versão vigente.
+2. Regras de pontuação e redutores. Cada família é limitada ao seu teto e perde os redutores que a desmentem, sem ficar abaixo de zero: o aparelho cadastrado abate a identidade, o destino conhecido abate os sinais da relação, e a mesma titularidade abate os sinais da relação e o valor.
+   - Comportamento = velocidade + valor + relação, limitado a `behavior_score_cap` (65). Os sinais da relação têm antes o próprio teto, `counterparty_relationship_cap` (30).
+   - Evidência = identidade + a parte dos sinais da base na contraparte. A contraparte inteira (relação mais base) é limitada a `counterparty_family_cap` (70).
+   - Pontuação de risco = identidade + comportamento + parte da base. A faixa sai dos limiares da versão vigente.
+   - Consequência: no modelo equilibrado, comportamento atípico sozinho chega no máximo a 65 e pede 2FA. Reprovar exige evidência: dúvida de identidade, sinais da base sobre o recebedor, uma regra eliminatória ou o limite noturno.
 3. Regras regulatórias. O limite noturno estourado reprova; o limite do dispositivo não cadastrado pede no mínimo 2FA. Vale a mais severa entre elas e a faixa da pontuação.
 4. Risco do recebedor. Sinais da relação menos os redutores de mesma titularidade e destino conhecido, nunca abaixo de zero, mais os sinais da base. Se atinge `destination_alert_threshold`, sai um alerta em `metadata.alerts`. Não muda a decisão.
 
 ## Modelos de política (carga inicial)
 
-- `conservative`, `balanced` e `permissive`, versão 1, `kind = 'template'`. Diferem só no limite de `amount_above_baseline`: 3, 5 e 10.
+- `conservative`, `balanced` e `permissive`, versão 1, `kind = 'template'`. Diferem no apetite de risco:
+
+| Parâmetro ou ajuste | conservative | balanced | permissive |
+|---|---|---|---|
+| `two_factor_score_threshold` | 35 | 40 | 45 |
+| `rejection_score_threshold` | 60 | 70 | 80 |
+| `destination_alert_threshold` | 25 | 30 | 35 |
+| `behavior_score_cap` | 105 (sem limite na prática) | 65 | 75 |
+| `amount_above_baseline` | 3 × | 5 × | 10 × |
+| `amount_far_above_baseline` | 10 × | 20 × | 40 × |
+
+  No conservador, comportamento atípico pode reprovar sozinho: ele reprova a falsa central sem evidência da base, e também o aluguel pago a um locador novo. No equilibrado e no permissivo, o teto do comportamento fica abaixo do limiar de reprovação.
 - `bank`, versão 1, `kind = 'bank'`, copiada do `balanced` (`based_on_version_id` aponta para ele).
 
 ## O que cada regra lê
@@ -304,7 +324,7 @@ Regras de convivência:
 - `two_factor_expires_at` preenchido se e somente se a decisão é `two_factor_required`.
 - `risk_policy_version_id` da análise aponta para uma versão da política `bank`, nunca de um modelo.
 - `registered_device.source_document` é o mesmo da análise de origem.
-- O ajuste de cada regra segue o catálogo: limite nulo quando `threshold_unit` é nulo, janela nula quando `uses_window` é falso, e toda versão tem as 21 linhas.
+- O ajuste de cada regra segue o catálogo: limite nulo quando `threshold_unit` é nulo, janela nula quando `uses_window` é falso, e toda versão tem as 22 linhas.
 - Fuso, números não finitos e limites com mais de 2 casas são recusados antes do INSERT, para nenhum CHECK virar 500.
 - `GET /risk-policy/templates` entra na entrega: os testes exigem.
 

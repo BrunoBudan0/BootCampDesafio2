@@ -7,13 +7,22 @@ from tests.utils.scenario import analyze, payer_with_accepted_history
 
 
 class TestAmountAboveBaseline:
-    def test_pix_far_above_the_baseline_adds_25_points(self):
+    def test_pix_above_five_times_the_baseline_adds_25_points(self):
         transaction_date = business_hours_today()
         payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
 
         assert rule_hit(analysis, "amount_above_baseline")["points"] == 25
+
+    def test_pix_above_twenty_times_the_baseline_adds_35_points_instead_of_25(self):
+        transaction_date = business_hours_today()
+        payer, _, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)
+
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 5000000))
+
+        assert rule_hit(analysis, "amount_far_above_baseline")["points"] == 35
+        assert_rule_not_fired(analysis, "amount_above_baseline")
 
     def test_reason_shows_the_multiplier_as_a_plain_number(self):
         transaction_date = business_hours_today()

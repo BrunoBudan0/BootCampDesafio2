@@ -42,6 +42,8 @@ PARAMETERS = {
     "velocity_family_cap",
     "amount_family_cap",
     "counterparty_family_cap",
+    "counterparty_relationship_cap",
+    "behavior_score_cap",
     "two_factor_score_threshold",
     "rejection_score_threshold",
     "two_factor_validity_minutes",
@@ -60,6 +62,7 @@ EDITABLE_RULES = {
     "new_account_above_cap",
     "burst_of_pix",
     "amount_above_baseline",
+    "amount_far_above_baseline",
     "monthly_volume_above_typical",
     "destination_account_opened_very_recently",
     "destination_account_opened_recently",
@@ -86,7 +89,9 @@ BALANCED_PARAMETERS = {
     "identity_family_cap": 50,
     "velocity_family_cap": 40,
     "amount_family_cap": 35,
-    "counterparty_family_cap": 40,
+    "counterparty_family_cap": 70,
+    "counterparty_relationship_cap": 30,
+    "behavior_score_cap": 65,
     "two_factor_score_threshold": 40,
     "rejection_score_threshold": 70,
     "two_factor_validity_minutes": 10,
@@ -139,14 +144,23 @@ class TestReadRiskPolicy:
         assert "nightly_limit_exceeded" not in codes
         assert "unregistered_device_limit_exceeded" not in codes
 
-    def test_templates_differ_only_in_the_amount_multiplier(self):
+    def test_templates_differ_in_thresholds_amount_multipliers_and_behavior_cap(self):
         multipliers = {
-            name: rule_setting(template(name), "amount_above_baseline")["threshold"]
+            name: (
+                rule_setting(template(name), "amount_above_baseline")["threshold"],
+                rule_setting(template(name), "amount_far_above_baseline")["threshold"],
+            )
             for name in ("conservative", "balanced", "permissive")
         }
 
-        assert multipliers == {"conservative": 3, "balanced": 5, "permissive": 10}
-        assert template("conservative")["parameters"] == template("permissive")["parameters"] == BALANCED_PARAMETERS
+        assert multipliers == {"conservative": (3, 10), "balanced": (5, 20), "permissive": (10, 40)}
+        assert template("balanced")["parameters"] == BALANCED_PARAMETERS
+        assert template("conservative")["parameters"] == dict(
+            BALANCED_PARAMETERS, two_factor_score_threshold=35, rejection_score_threshold=60, destination_alert_threshold=25, behavior_score_cap=105
+        )
+        assert template("permissive")["parameters"] == dict(
+            BALANCED_PARAMETERS, two_factor_score_threshold=45, rejection_score_threshold=80, destination_alert_threshold=35, behavior_score_cap=75
+        )
 
     def test_bank_policy_follows_the_balanced_template(self):
         policy = current_bank_policy()
@@ -206,14 +220,15 @@ class TestEditRiskPolicy:
         assert old_version == before
 
     def test_version_based_on_a_template_copies_the_template(self, restore_bank_policy):
-        edit_bank_policy({"change_reason": "Ajusta antes de trocar de modelo", "parameters": {"two_factor_score_threshold": 35}}, "editar a política")
+        edit_bank_policy({"change_reason": "Ajusta antes de trocar de modelo", "parameters": {"two_factor_score_threshold": 50}}, "editar a política")
 
         status, body = RequestGenerator.POST_risk_policy_version({"change_reason": "Passa a seguir o modelo conservador", "based_on_template": "conservative"})
 
         assert status == 201
         assert body["based_on"] == {"name": "conservative", "version": 1}
-        assert body["parameters"]["two_factor_score_threshold"] == 40
+        assert body["parameters"]["two_factor_score_threshold"] == 35
         assert rule_setting(body, "amount_above_baseline")["threshold"] == 3
+        assert rule_setting(body, "amount_far_above_baseline")["threshold"] == 10
 
     def test_new_analyses_record_the_new_version(self, restore_bank_policy):
         edited = edit_bank_policy({"change_reason": "Versão para conferir a análise", "parameters": {"destination_alert_threshold": 25}}, "editar a política")
@@ -263,6 +278,7 @@ class TestEditRiskPolicy:
         analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date, 200000))
 
         assert_rule_not_fired(analysis, "amount_above_baseline")
+        assert_rule_not_fired(analysis, "amount_far_above_baseline")
 
     def test_amount_floor_is_compared_with_the_accumulated_amount(self, restore_bank_policy):
         transaction_date = business_hours_today()
@@ -273,7 +289,7 @@ class TestEditRiskPolicy:
 
         analysis = analyze(pix_payload(payer, payee, transaction_date + timedelta(minutes=1), 600000))
 
-        assert_rule_fired(analysis, "amount_above_baseline")
+        assert_rule_fired(analysis, "amount_far_above_baseline")
 
     def test_shorter_monthly_volume_window_is_compared_with_a_typical_volume_of_the_same_length(self, restore_bank_policy):
         transaction_date = business_hours_today()
@@ -353,6 +369,8 @@ class TestEditRiskPolicy:
                 "QIT001016",
             ),
             ({"change_reason": "Mês maior que o histórico", "parameters": {"history_window_days": 30}}, "QIT001016"),
+            ({"change_reason": "Relação acima da contraparte", "parameters": {"counterparty_relationship_cap": 80}}, "QIT001016"),
+            ({"change_reason": "Faixas de valor trocadas", "rules": [{"code": "amount_far_above_baseline", "threshold": 5}]}, "QIT001016"),
         ],
     )
     def test_inconsistent_edit_is_refused_with_422_and_creates_no_version(self, invalid_edit, expected_code):
