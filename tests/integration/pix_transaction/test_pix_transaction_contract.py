@@ -245,6 +245,20 @@ class TestPixTransactionContract:
         assert_error(response.response_status, response.response_json, 400, "QIT000001")
         assert_nothing_was_recorded(payload["id"])
 
+    def test_body_that_is_not_utf8_is_refused_with_400_and_not_recorded(self):
+        payload = valid_payload()
+        body_with_latin1_byte = json.dumps(payload).encode("utf-8").replace(b'"channel": "app"', b'"channel": "ap\xe7"')
+
+        response = ClientRequisition.send(
+            "POST",
+            "/pix/transaction",
+            data=body_with_latin1_byte,
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN, "Content-Type": "application/json"},
+        )
+
+        assert_error(response.response_status, response.response_json, 400, "QIT000001")
+        assert_nothing_was_recorded(payload["id"])
+
     def test_same_document_with_and_without_punctuation_is_the_same_payer(self):
         transaction_date = business_hours_today()
         payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=2), 3)

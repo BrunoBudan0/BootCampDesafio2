@@ -61,6 +61,9 @@ def register_error_handlers(application: FastAPI) -> None:
         if exception.status_code == 405:
             return qi_exception_to_response(MethodNotAllowed())
 
+        if exception.status_code == 400:
+            return qi_exception_to_response(InvalidSchema(str(exception.detail)))
+
         logger.error(f"HTTP {exception.status_code} em {request.url.path}: {exception.detail}")
         return qi_exception_to_response(InternalError())
 
