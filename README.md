@@ -170,7 +170,7 @@ Dois exemplos, com um pagador que faz Pix de R$ 100 há dois meses no mesmo celu
 | Limiar de 2FA | 35 | 40 | 45 |
 | Limiar de reprovação | 60 | 70 | 80 |
 | Limiar de alerta | 25 | 30 | 30 |
-| Teto do comportamento | sem limite | 65 | 75 |
+| Teto do comportamento | 105 (a soma dos tetos de tempo, valor e relação) | 65 | 75 |
 | Valor fora do padrão | 3 × base | 5 × base | 10 × base |
 | Valor muito fora do padrão | 10 × base | 20 × base | 40 × base |
 
@@ -183,7 +183,7 @@ O banco pode personalizar a política, mas a QI não assina embaixo de qualquer 
 | Situação | Resultado | Por quê |
 |----------|-----------|---------|
 | Edição mais rígida que a referência | Aceita | Mais fricção é escolha do banco, não risco de fraude |
-| Edição mais frouxa, dentro da faixa de segurança | Aceita só com `risk_acknowledged` e `requested_by`, gravados na versão | Fica registrado quem afrouxou, quando, por quê e que foi avisado |
+| Edição mais frouxa, dentro da faixa de segurança | Aceita só com `risk_acknowledged` e `requested_by`, gravados na versão; sem eles, 422 QIT001020 com a lista do que afrouxou | Fica registrado quem afrouxou, quando, por quê e que foi avisado |
 | Valor além da faixa de segurança | 422 QIT001018 | O modelo permissivo é, em linhas gerais, a fronteira do que a QI aceita |
 | Regra eliminatória desligada | 422 QIT001018 | Elas existem para fraudes em que o 2FA não protege |
 | Algum caso-âncora deixa de ser pego | 422 QIT001019 | Afrouxar um pouco cada ajuste não pode somar uma política que deixa passar invasão, laranja marcado ou falsa central |
@@ -195,7 +195,7 @@ As faixas e os casos-âncora ficam em `GET /risk-policy/guardrails`. Os valores 
 O próximo passo, desenhado mas fora desta entrega, é medir quanto as decisões do banco se afastam da referência e a QI entrar em contato quando a diferença for grande:
 
 1. **Onde roda:** um job na própria instalação do banco, separado da API, de madrugada e lendo de uma réplica. O tempo de análise do Pix não muda.
-2. **O que faz:** reprocessa os Pix do período com a política de referência e compara com a decisão que o banco tomou. Isso é possível porque nenhuma regra lê o relógio, tudo é só INSERT e o payload inteiro fica gravado: o estado do banco no momento de cada Pix é reconstruído pela ordem de gravação.
+2. **O que faz:** reprocessa os Pix do período com a política de referência e compara com a decisão que o banco tomou. Isso é possível porque nenhuma regra lê o relógio, tudo é só INSERT e todos os campos do Pix ficam gravados, cada um na sua coluna: o estado do banco no momento de cada Pix é reconstruído pela ordem de gravação.
 3. **O que mede:** Pix em que o banco foi mais frouxo que a referência (em quantidade e em valor somado), Pix em que foi mais rígido, e as regras que explicam a diferença.
 4. **Quando avisa:** contato imediato se algum Pix aprovado pelo banco seria reprovado por evidência da base; contato recomendado se a parcela de Pix mais frouxos passar de um limite; oportunidade de ajuda se o banco estiver muito mais rígido que a referência.
 5. **O que sai do banco:** só o resumo agregado, enviado pelo `connectors/rest_connector.py`. Nenhum CPF, CNPJ, conta, IP, localização, valor individual ou identificador de Pix vai para a QI; soma de valor só com pelo menos 5 Pix. A lista dos Pix divergentes fica no banco, e é lá que os dois olham quando conversam.
@@ -254,7 +254,7 @@ Rodar os testes, com a API de pé:
 pytest
 ```
 
-São 333 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
+São 334 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
 
 A API atende em `http://localhost:3000`. Toda rota, menos `/` e `/health_check`, exige o header `INTERNAL-TOKEN` (o padrão é `default_token`).
 

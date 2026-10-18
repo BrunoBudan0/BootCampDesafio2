@@ -2,7 +2,7 @@
 
 Os termos seguem a [linguagem onipresente](linguagem-onipresente.md) e as tabelas seguem a [modelagem de dados](modelagem-de-dados.md). Este documento fecha o que os testes exigem: como cada regra é calculada, o formato de cada resposta, os códigos de erro e o porquê de cada schema.
 
-O projeto segue TDD: os testes foram escritos antes do código, viram vermelhos com HTTP 404 e ficaram verdes quando as rotas entraram. Hoje a suíte tem 333 testes e todos passam, de forma estável, inclusive com o banco recriado do zero.
+O projeto segue TDD: os testes foram escritos antes do código, viram vermelhos com HTTP 404 e ficaram verdes quando as rotas entraram. Hoje a suíte tem 334 testes e todos passam, de forma estável, inclusive com o banco recriado do zero.
 
 ## 1. Como rodar
 
@@ -174,7 +174,7 @@ Todo erro tem o corpo `{title, description, translation, code}`.
 
 | Código | HTTP | Quando | Rotas |
 |---|---|---|---|
-| QIT000001 | 400 | O corpo não segue o JSON Schema, ou traz número que não é finito (NaN, Infinity), que o JSON Schema não barra | Todas com corpo |
+| QIT000001 | 400 | O corpo não segue o JSON Schema, não é JSON válido em UTF-8, ou traz número que não é finito (NaN, Infinity), que o JSON Schema não barra | Todas com corpo |
 | QIT000002 | 403 | Sem `INTERNAL-TOKEN` ou com token errado | Todas, menos `/` e `/health_check` |
 | QIT000404 | 404 | Rota inexistente | Qualquer |
 | QIT000405 | 405 | Método não aceito na rota | Qualquer |
@@ -298,7 +298,7 @@ Essas garantias não entram na suíte, porque a regra do projeto é testar só p
 
 | Arquivo | Testes | O que prova |
 |---|---|---|
-| `test_pix_transaction_contract.py` | 76 | Token obrigatório; o payload de exemplo do desafio é reprovado pelo limite noturno (PF para PF às 22h15 com R$ 1.500); id `.` e `..` e fuso fora da faixa são recusados; latitude NaN dá 400; o mesmo CPF com e sem pontuação forma um histórico; formato da resposta; cada campo obrigatório faltando dá 400; cada valor inválido dá 400; datas inexistentes, IP inexistente, documentos com dígito errado e conta aberta depois do Pix dão 422; documento sem pontuação, CNPJ alfanumérico, IPv6 e geolocalização ausente ou nula são aceitos; nada recusado fica gravado |
+| `test_pix_transaction_contract.py` | 77 | Token obrigatório; o payload de exemplo do desafio é reprovado pelo limite noturno (PF para PF às 22h15 com R$ 1.500); id `.` e `..` e fuso fora da faixa são recusados; latitude NaN dá 400; o mesmo CPF com e sem pontuação forma um histórico; formato da resposta; cada campo obrigatório faltando dá 400; cada valor inválido dá 400; datas inexistentes, IP inexistente, documentos com dígito errado e conta aberta depois do Pix dão 422; documento sem pontuação, CNPJ alfanumérico, IPv6 e geolocalização ausente ou nula são aceitos; nada recusado fica gravado |
 | `test_pix_transaction_idempotency.py` | 7 | Repetição devolve a mesma análise com 200; a ordem dos campos não importa; documento sem pontuação, canal em maiúsculas e valor `10000.0` são o mesmo Pix; o mesmo instante com outro fuso é outro conteúdo; mesmo `id` com outro conteúdo dá 409 e mantém a primeira; 5 cópias em paralelo geram uma análise; repetição não conta como tentativa |
 | `test_pix_transaction_get.py` | 7 | GET igual ao POST; 404 com QIT001001; token; nenhum documento exposto; 2FA pendente e expirado pelo relógio; Pix aprovado sem `two_factor` |
 | `test_pix_decision_flow.py` | 28 | Pix sem sinal aprova com zero; teto de família (contraparte até 70); teto da relação (30); teto do comportamento: atipicidade sozinha para no 2FA; a base reprova sozinha mesmo com valor habitual; cada redutor só abate a família que desmente; risco do recebedor sem teto; redutores; pontuação nunca negativa; faixas 40 e 70; regulatória de 2FA vence pontuação baixa; limite noturno reprova e mantém a pontuação; eliminatória encerra sem pontuação; validade de 10 minutos; versão da política na análise; formato de cada regra disparada; alerta a partir de 30 e conta de destino muito recente sozinha sem alerta; redutores não abatem sinais da base; destino conhecido abate sinais da relação; eliminatória esconde a regulatória; Pix simultâneos do mesmo pagador, do mesmo aparelho e para o mesmo recebedor se enxergam (travas) |
