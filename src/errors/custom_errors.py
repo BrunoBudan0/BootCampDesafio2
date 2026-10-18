@@ -37,11 +37,15 @@ class RegulatoryRuleNotEditable(QIException):
 class RuleSettingNotApplicable(QIException):
     code = "QIT001014"
 
-    def __init__(self, rule_code: str, setting_name: str) -> None:
+    def __init__(self, rule_code: str, setting_name: str, refused_value=None) -> None:
         title = "Rule Setting Not Applicable"
         http_status = 422
-        description = f"The rule {rule_code} does not use the setting {setting_name}."
-        translation = f"A regra {rule_code} não usa o ajuste {setting_name}."
+        if refused_value is None:
+            description = f"The rule {rule_code} does not use the setting {setting_name}."
+            translation = f"A regra {rule_code} não usa o ajuste {setting_name}."
+        else:
+            description = f"The rule {rule_code} does not accept {refused_value} as {setting_name}: whole units for counts and days, at most 2 decimal places otherwise."
+            translation = f"A regra {rule_code} não aceita {refused_value} em {setting_name}: contagens e dias são inteiros, e os demais limites têm no máximo 2 casas."
         super().__init__(title, self.code, http_status, description, translation)
 
 

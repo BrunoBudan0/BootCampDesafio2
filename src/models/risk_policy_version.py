@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 
 from models.base import Base
 
+
 class RiskPolicyVersion(Base):
     __tablename__ = "risk_policy_version"
 

@@ -3,6 +3,7 @@ from typing import Optional, Union
 
 from models import RiskPolicyRuleSetting, RiskPolicyVersion
 
+
 def decimal_to_json_number(value: Optional[Decimal]) -> Optional[Union[int, float]]:
     if value is None:
         return None

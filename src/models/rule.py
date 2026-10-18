@@ -2,6 +2,7 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, f
 
 from models.base import Base
 
+
 class Rule(Base):
     __tablename__ = "rule"
 

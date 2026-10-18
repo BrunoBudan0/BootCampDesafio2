@@ -1,6 +1,8 @@
 from sqlalchemy import select
 
 from models import Rule
+
+
 class RuleRepository:
     def __init__(self, context) -> None:
         self.session = context.db_session

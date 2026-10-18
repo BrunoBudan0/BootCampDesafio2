@@ -2,6 +2,7 @@ from sqlalchemy import Column, DateTime, Integer, String, func
 
 from models.base import Base
 
+
 class RiskPolicy(Base):
     __tablename__ = "risk_policy"
 

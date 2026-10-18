@@ -24,6 +24,7 @@ LARGEST_VERSION_DIGITS = 9
 MINUTES_PER_DAY = 1440
 DECIMAL_SETTING_PLACES = Decimal("0.01")
 DECIMAL_SETTING_FIELDS = ("threshold", "company_threshold")
+WHOLE_UNIT_THRESHOLDS = ("count", "days")
 
 
 class RiskPolicyController(BaseController):
@@ -98,9 +99,12 @@ class RiskPolicyController(BaseController):
 
             setting_changes = {field: value for field, value in rule_edit_item.items() if field != "code"}
 
-            for field in setting_changes:
+            for field, value in setting_changes.items():
                 if not self.rule_accepts_setting(rule, field):
                     raise RuleSettingNotApplicable(code, field)
+
+                if field in DECIMAL_SETTING_FIELDS and not self.rule_accepts_setting_value(rule, field, value):
+                    raise RuleSettingNotApplicable(code, field, value)
 
             rule_edits[code] = setting_changes
 
@@ -116,6 +120,16 @@ class RiskPolicyController(BaseController):
             "company_threshold": rule.uses_company_threshold,
         }
         return accepted_settings[field]
+
+    @staticmethod
+    def rule_accepts_setting_value(rule: Rule, field: str, value) -> bool:
+        decimal_value = Decimal(str(value))
+
+        if decimal_value != decimal_value.quantize(DECIMAL_SETTING_PLACES):
+            return False
+
+        counts_whole_units = field == "company_threshold" or rule.threshold_unit in WHOLE_UNIT_THRESHOLDS
+        return not counts_whole_units or decimal_value == decimal_value.to_integral_value()
 
     @staticmethod
     def edited_rule_setting(base_setting: RiskPolicyRuleSetting, setting_changes: dict) -> RiskPolicyRuleSetting:

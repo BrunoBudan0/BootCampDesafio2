@@ -5,6 +5,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from models import RiskPolicy, RiskPolicyRuleSetting, RiskPolicyVersion
 
+
 class RiskPolicyRepository:
     def __init__(self, context) -> None:
         self.session = context.db_session
