@@ -5,13 +5,12 @@ from uuid import UUID
 
 import pytest
 
-from tests.utils.assertions import assert_error, assert_rule_fired, fired_rule_codes
+from tests.utils.assertions import assert_error, assert_rule_fired, assert_rule_not_fired, fired_rule_codes
 from tests.utils.clock import business_hours_today, iso
 from tests.utils.pix_payload import (
-    new_company_payee,
     new_individual_payee,
     new_individual_payer,
-    payee_owned_by,
+    new_payee,
     pix_payload,
 )
 from tests.utils.random_generator import RandomGenerator
@@ -309,14 +308,16 @@ class TestPixTransactionContract:
 
         assert status == 201
 
-    def test_alphanumeric_cnpj_is_accepted(self):
-        payee = new_company_payee()
-        payload = pix_payload(new_individual_payer(), payee, business_hours_today())
-        payload["destination_account"]["owner"]["document_number"] = RandomGenerator.generate_alphanumeric_cnpj()
+    def test_alphanumeric_cnpj_is_accepted_as_a_company(self):
+        transaction_date = business_hours_today()
+        payee = new_payee(RandomGenerator.generate_alphanumeric_cnpj(), None)
+        for position in range(4):
+            analyze(pix_payload(new_individual_payer(), payee, transaction_date - timedelta(minutes=10 + position)), f"pagar a mesma PJ ({position + 1} de 4)")
 
-        status, body = RequestGenerator.POST_pix_transaction(payload)
+        status, body = RequestGenerator.POST_pix_transaction(pix_payload(new_individual_payer(), payee, transaction_date))
 
         assert status == 201
+        assert_rule_not_fired(body, "destination_receiving_from_many_sources")
 
     def test_ipv6_is_accepted(self):
         payload = payload_with_changed_field(valid_payload(), ["source", "ip"], "2001:db8::1")
@@ -324,6 +325,8 @@ class TestPixTransactionContract:
         status, body = RequestGenerator.POST_pix_transaction(payload)
 
         assert status == 201
+        assert body["status"] == "approved"
+        assert body["metadata"]["rules"] == []
 
     @pytest.mark.parametrize("geolocation", [None, "absent"])
     def test_geolocation_is_optional(self, geolocation):
@@ -336,10 +339,5 @@ class TestPixTransactionContract:
         status, body = RequestGenerator.POST_pix_transaction(payload)
 
         assert status == 201
-
-    def test_pix_to_own_document_in_another_bank_is_accepted(self):
-        payer = new_individual_payer()
-
-        status, body = RequestGenerator.POST_pix_transaction(pix_payload(payer, payee_owned_by(payer), business_hours_today()))
-
-        assert status == 201
+        assert body["status"] == "approved"
+        assert body["metadata"]["rules"] == []

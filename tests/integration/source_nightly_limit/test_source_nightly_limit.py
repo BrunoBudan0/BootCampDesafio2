@@ -2,16 +2,23 @@ from datetime import timedelta
 
 import pytest
 
-from tests.utils.assertions import assert_error
+from tests.utils.assertions import assert_error, assert_rule_fired
 from tests.utils.clock import iso, parse_iso, today_at
+from tests.utils.pix_payload import new_individual_payee, new_payer, pix_payload
 from tests.utils.random_generator import RandomGenerator
 from tests.utils.request_generator import RequestGenerator
 from tests.utils.requisition import ClientRequisition
-from tests.utils.scenario import assert_scenario_step_succeeded
+from tests.utils.scenario import analyze, assert_scenario_step_succeeded
 
 
 def nightly_limit(limit_cents, requested_at):
     return {"nightly_limit_cents": limit_cents, "requested_at": iso(requested_at)}
+
+
+def assert_default_nightly_limit_still_applies(document_number):
+    analysis = analyze(pix_payload(new_payer(document_number, None), new_individual_payee(), today_at(21), 100001), "pagar R$ 1.000,01 às 21h")
+    assert analysis["status"] == "rejected"
+    assert_rule_fired(analysis, "nightly_limit_exceeded")
 
 
 class TestSourceNightlyLimit:
@@ -76,19 +83,25 @@ class TestSourceNightlyLimit:
             {"nightly_limit_cents": 500000, "requested_at": "2026-10-17T09:00:00-03:00", "extra": 1},
         ],
     )
-    def test_invalid_body_is_refused_with_400(self, invalid_body):
-        status, body = RequestGenerator.POST_source_nightly_limit(RandomGenerator.generate_cpf(), invalid_body)
+    def test_invalid_body_is_refused_with_400_and_the_default_limit_still_applies(self, invalid_body):
+        document_number = RandomGenerator.generate_cpf()
+
+        status, body = RequestGenerator.POST_source_nightly_limit(document_number, invalid_body)
 
         assert_error(status, body, 400, "QIT000001")
+        assert_default_nightly_limit_still_applies(document_number)
 
     @pytest.mark.parametrize("impossible_date", ["2026-02-30T09:00:00-03:00", "9999-12-31T23:00:00+00:00"])
-    def test_impossible_request_date_is_refused_with_422(self, impossible_date):
+    def test_impossible_request_date_is_refused_with_422_and_the_default_limit_still_applies(self, impossible_date):
+        document_number = RandomGenerator.generate_cpf()
+
         status, body = RequestGenerator.POST_source_nightly_limit(
-            RandomGenerator.generate_cpf(),
+            document_number,
             {"nightly_limit_cents": 500000, "requested_at": impossible_date},
         )
 
         assert_error(status, body, 422, "QIT001004")
+        assert_default_nightly_limit_still_applies(document_number)
 
     def test_limit_without_internal_token_is_refused_with_403(self):
         response = ClientRequisition.send(

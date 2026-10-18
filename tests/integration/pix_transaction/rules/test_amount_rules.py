@@ -44,6 +44,7 @@ class TestAmountAboveBaseline:
         analysis = analyze(pix_payload(new_individual_payer(), new_individual_payee(), business_hours_today(), 100000000))
 
         assert_rule_not_fired(analysis, "amount_above_baseline")
+        assert_rule_not_fired(analysis, "amount_far_above_baseline")
 
     def test_split_pix_to_the_same_destination_add_up_against_the_baseline(self):
         transaction_date = business_hours_today()
@@ -82,6 +83,14 @@ class TestMonthlyVolumeAboveTypical:
         analysis = analyze(pix_payload(payer, payee, transaction_date, 30000))
 
         assert_rule_not_fired(analysis, "monthly_volume_above_typical")
+
+    def test_exactly_one_month_of_history_before_the_last_30_days_is_compared(self):
+        transaction_date = business_hours_today()
+        payer, payee, _ = payer_with_accepted_history(transaction_date - timedelta(days=60), 1)
+
+        analysis = analyze(pix_payload(payer, payee, transaction_date, 40000))
+
+        assert fired_rule_hit(analysis, "monthly_volume_above_typical")["points"] == 20
 
     def test_less_than_a_month_of_history_before_the_last_30_days_is_not_compared(self):
         transaction_date = business_hours_today()

@@ -340,7 +340,7 @@ Rodar os testes, com a API de pé:
 pytest
 ```
 
-São 368 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
+São 370 testes, todos pela API, sem ler o banco. Rode num banco recém-criado: os testes contam com a população de Pix que eles mesmos geram.
 
 A API atende em `http://localhost:3000`. Toda rota, menos `/` e `/health_check`, exige o header `INTERNAL-TOKEN` (o padrão é `default_token`).
 

@@ -48,6 +48,15 @@ class TestLongRegisteredDevice:
 
         assert fired_rule_hit(analysis, "long_registered_device")["points"] == -10
 
+    def test_device_registered_exactly_30_days_ago_subtracts_10_points(self):
+        transaction_date = business_hours_today()
+        payer = new_individual_payer()
+        analyze_expecting(pix_payload(payer, new_individual_payee(), transaction_date - timedelta(days=30)), "approved", "registrar o aparelho")
+
+        analysis = analyze(pix_payload(payer, new_individual_payee(), transaction_date))
+
+        assert fired_rule_hit(analysis, "long_registered_device")["points"] == -10
+
     def test_device_registered_29_days_ago_is_not_old_enough(self):
         transaction_date = business_hours_today()
         payer = new_individual_payer()

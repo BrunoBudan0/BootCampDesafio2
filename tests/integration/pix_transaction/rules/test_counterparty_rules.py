@@ -208,6 +208,15 @@ class TestDestinationReceivingFromManySources:
 
         assert_rule_not_fired(analysis, "destination_receiving_from_many_sources")
 
+    def test_current_pix_below_the_amount_rules_floor_does_not_count(self):
+        transaction_date = business_hours_today()
+        payee = new_individual_payee()
+        other_payers_paying(payee, transaction_date, 4)
+
+        analysis = analyze(pix_payload(new_individual_payer(), payee, transaction_date, 9999))
+
+        assert_rule_not_fired(analysis, "destination_receiving_from_many_sources")
+
     def test_payers_from_one_hour_ago_or_more_do_not_count(self):
         transaction_date = business_hours_today()
         payee = new_individual_payee()

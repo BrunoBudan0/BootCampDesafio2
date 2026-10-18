@@ -150,6 +150,7 @@ class TestTwoFactorConfirmation:
         )
 
         assert status == 201
+        assert body["metadata"]["two_factor"]["status"] == "confirmed"
 
     @pytest.mark.parametrize(
         "invalid_body",
