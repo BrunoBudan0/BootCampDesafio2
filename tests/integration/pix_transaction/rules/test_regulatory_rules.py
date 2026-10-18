@@ -14,6 +14,7 @@ from tests.utils.request_generator import RequestGenerator
 from tests.utils.scenario import (
     analyze,
     analyze_expecting,
+    build_accepted_history,
     confirm_two_factor,
     fire_together,
     payer_with_accepted_history,
@@ -39,7 +40,7 @@ class TestNightlyLimit:
         assert rule_hit(analysis, "nightly_limit_exceeded")["kind"] == "regulatory"
 
     def test_split_pix_in_the_same_night_add_up(self):
-        payer = payer_with_registered_device()
+        payer, _ = payer_with_registered_device()
         analyze_expecting(pix_payload(payer, new_individual_payee(), today_at(21), 60000), "approved", "primeira parte da noite")
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), today_at(23), 50000))
@@ -47,7 +48,7 @@ class TestNightlyLimit:
         assert_rule_fired(analysis, "nightly_limit_exceeded")
 
     def test_the_night_continues_after_midnight(self):
-        payer = payer_with_registered_device()
+        payer, _ = payer_with_registered_device()
         analyze_expecting(pix_payload(payer, new_individual_payee(), today_at(23), 90000), "approved", "Pix antes da meia-noite")
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), today_at(1) + timedelta(days=1), 20000))
@@ -55,7 +56,7 @@ class TestNightlyLimit:
         assert_rule_fired(analysis, "nightly_limit_exceeded")
 
     def test_each_night_has_its_own_limit(self):
-        payer = payer_with_registered_device()
+        payer, _ = payer_with_registered_device()
         analyze_expecting(pix_payload(payer, new_individual_payee(), today_at(23), 90000), "approved", "Pix da primeira noite")
 
         analysis = analyze(pix_payload(payer, new_individual_payee(), today_at(21) + timedelta(days=1), 90000))
@@ -123,7 +124,7 @@ class TestNightlyLimit:
         assert_rule_not_fired(analysis, "nightly_limit_exceeded")
 
     def test_parallel_pix_in_the_same_night_cannot_both_pass(self):
-        payer = payer_with_registered_device()
+        payer, _ = payer_with_registered_device()
         payloads = [pix_payload(payer, new_individual_payee(), today_at(23), 60000) for _ in range(2)]
 
         responses = fire_together([lambda payload=payload: RequestGenerator.POST_pix_transaction(payload) for payload in payloads])
@@ -152,7 +153,8 @@ class TestUnregisteredDeviceLimit:
 
     def test_daily_sum_on_an_unregistered_device_above_1000_reais_is_limited(self):
         morning = today_at(10)
-        payer, payee, _ = payer_with_accepted_history(morning - timedelta(days=2), 5, amount_cents=30000)
+        payer, payee = payer_with_registered_device()
+        build_accepted_history(payer, payee, morning - timedelta(days=2), 5, amount_cents=30000)
         new_device_payer = payer_on_another_device(payer)
         last_small_pix = None
         for position in range(5):
@@ -169,7 +171,8 @@ class TestUnregisteredDeviceLimit:
 
     def test_daily_sum_restarts_at_local_midnight(self):
         late_evening = today_at(23)
-        payer, payee, _ = payer_with_accepted_history(late_evening - timedelta(days=2), 5, amount_cents=30000, payee=new_company_payee())
+        payer, payee = payer_with_registered_device(payee=new_company_payee())
+        build_accepted_history(payer, payee, late_evening - timedelta(days=2), 5, amount_cents=30000)
         new_device_payer = payer_on_another_device(payer)
         for position in range(5):
             analyze(pix_payload(new_device_payer, payee, late_evening + timedelta(minutes=10 * position), 19000))

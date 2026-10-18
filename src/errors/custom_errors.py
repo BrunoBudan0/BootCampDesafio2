@@ -78,3 +78,113 @@ class ConcurrentRiskPolicyEdit(QIException):
         description = "Another edit created this version of the bank risk policy first. Read the current version and try again."
         translation = "Outra edição criou esta versão da política de risco do banco antes. Leia a versão vigente e tente de novo."
         super().__init__(title, self.code, http_status, description, translation)
+
+
+class PixAnalysisNotFound(QIException):
+    code = "QIT001001"
+
+    def __init__(self, pix_id: str) -> None:
+        title = "Pix Analysis Not Found"
+        http_status = 404
+        description = f"There is no analysis for the Pix {pix_id}."
+        translation = f"Não existe análise para o Pix {pix_id}."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class PixIdUsedWithOtherContent(QIException):
+    code = "QIT001002"
+
+    def __init__(self, pix_id: str) -> None:
+        title = "Pix Id Used With Other Content"
+        http_status = 409
+        description = f"The Pix {pix_id} was already analyzed with different content."
+        translation = f"O Pix {pix_id} já foi analisado com outro conteúdo."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class InvalidDocumentNumber(QIException):
+    code = "QIT001003"
+
+    def __init__(self, field_name: str) -> None:
+        title = "Invalid Document Number"
+        http_status = 422
+        description = f"The document in {field_name} is not a valid CPF or CNPJ."
+        translation = f"O documento em {field_name} não é um CPF ou CNPJ válido."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class InvalidDate(QIException):
+    code = "QIT001004"
+
+    def __init__(self, field_name: str) -> None:
+        title = "Invalid Date"
+        http_status = 422
+        description = f"The date in {field_name} does not exist or has a UTC offset outside -12:00 to +14:00."
+        translation = f"A data em {field_name} não existe ou tem fuso fora de -12:00 a +14:00."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class InvalidIpAddress(QIException):
+    code = "QIT001005"
+
+    def __init__(self) -> None:
+        title = "Invalid IP Address"
+        http_status = 422
+        description = "The source ip is not a valid IPv4 or IPv6 address."
+        translation = "O IP de origem não é um IPv4 nem um IPv6 válido."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class AccountOpenedAfterTransaction(QIException):
+    code = "QIT001006"
+
+    def __init__(self, account_name: str) -> None:
+        title = "Account Opened After Transaction"
+        http_status = 422
+        description = f"The {account_name} was opened after the Pix transaction date."
+        translation = f"A conta em {account_name} foi aberta depois da data do Pix."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class TwoFactorNotRequested(QIException):
+    code = "QIT001007"
+
+    def __init__(self, pix_id: str) -> None:
+        title = "Two Factor Not Requested"
+        http_status = 409
+        description = f"The analysis of the Pix {pix_id} did not ask for two factor authentication."
+        translation = f"A análise do Pix {pix_id} não pediu 2FA."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class TwoFactorAlreadyAnswered(QIException):
+    code = "QIT001008"
+
+    def __init__(self, pix_id: str, recorded_result: str) -> None:
+        title = "Two Factor Already Answered"
+        http_status = 409
+        description = f"The two factor of the Pix {pix_id} was already recorded as {recorded_result}."
+        translation = f"O 2FA do Pix {pix_id} já foi registrado como {recorded_result}."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class TwoFactorOutsideValidity(QIException):
+    code = "QIT001009"
+
+    def __init__(self, pix_id: str) -> None:
+        title = "Two Factor Outside Validity"
+        http_status = 422
+        description = f"The confirmation of the Pix {pix_id} is before the Pix or after the two factor expiration."
+        translation = f"A confirmação do Pix {pix_id} é anterior ao Pix ou posterior ao vencimento do 2FA."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class NightlyLimitOnlyForIndividuals(QIException):
+    code = "QIT001010"
+
+    def __init__(self) -> None:
+        title = "Nightly Limit Only For Individuals"
+        http_status = 422
+        description = "The nightly limit of the regulation applies only to individuals (CPF)."
+        translation = "O limite noturno da norma vale só para pessoa física (CPF)."
+        super().__init__(title, self.code, http_status, description, translation)

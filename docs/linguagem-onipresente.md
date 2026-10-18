@@ -118,8 +118,8 @@ Existem no mundo do Pix, mas não neste sistema: liquidação, SPI, saldo, MED, 
 
 | Termo | No código | Definição | Não confundir com |
 |---|---|---|---|
-| Destino novo | `new_destination` | Recebedor cujo documento nunca apareceu no histórico do pagador | Conta de destino recente |
-| Destino conhecido | `known_destination` | Recebedor com pelo menos N Pix aceitos do pagador (3) | |
+| Destino novo | `new_destination` | Recebedor cujo documento não aparece nos Pix aceitos do pagador anteriores à janela de curto prazo. Pix aceitos nas últimas 24 h ainda não tornam o destino conhecido, para que aquecer um destino no mesmo dia não funcione | Conta de destino recente |
+| Destino conhecido | `known_destination` | Recebedor com pelo menos N Pix aceitos do pagador (3), contando só os anteriores à janela de curto prazo | |
 | Conta de destino recente | `destination_account_opened_*` | Conta de destino aberta há poucos dias | Destino novo |
 | Mesma titularidade | `same_owner` | Documento do pagador igual ao do recebedor | |
 | Fan-in | `destination_receiving_from_many_sources` | Recebedor PF que recebe Pix a partir do piso das regras de valor de muitos pagadores diferentes em pouco tempo | |

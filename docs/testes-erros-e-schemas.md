@@ -2,7 +2,7 @@
 
 Os termos seguem a [linguagem onipresente](linguagem-onipresente.md) e as tabelas seguem a [modelagem de dados](modelagem-de-dados.md). Este documento fecha o que os testes exigem: como cada regra é calculada, o formato de cada resposta, os códigos de erro e o porquê de cada schema.
 
-O projeto segue TDD: os testes foram escritos antes do código. Hoje a suíte tem 297 testes. Com as rotas ainda inexistentes, 289 falham com HTTP 404 e 8 passam: os 6 de health check do template e 2 de token ausente, porque o middleware de INTERNAL-TOKEN do Base Service já recusa qualquer rota sem token. Os testes que editam a política também dão erro no fim, porque a restauração da política confere o 201 e a rota ainda não existe.
+O projeto segue TDD: os testes foram escritos antes do código, viram vermelhos com HTTP 404 e ficaram verdes quando as rotas entraram. Hoje a suíte tem 298 testes e todos passam, de forma estável, inclusive com o banco recriado do zero.
 
 ## 1. Como rodar
 
@@ -65,7 +65,7 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 |---|---|
 | `device_used_by_many_sources` | Documentos de pagador distintos nas tentativas com o mesmo `device_id` em `(T menos 24 h, T]`, contando o atual, `>= 5` |
 | `impossible_travel_on_unregistered_device` | Velocidade `> 900 km/h` e o aparelho não está cadastrado para o pagador |
-| `new_account_to_new_destination_far_above_cap` | Conta nova, destino novo e valor acumulado no recebedor `> 5 ×` teto de conta nova |
+| `new_account_to_new_destination_far_above_cap` | Conta nova, destino novo (ver a definição em `new_destination_above_usual_ceiling`) e valor acumulado no recebedor `> 5 ×` teto de conta nova |
 | `nightly_limit_exceeded` | Pagador e recebedor PF, Pix à noite e a soma da noite (valor do Pix mais o consumo de limite PF para PF desde o início da noite) `>` limite noturno do pagador. Vale também em início frio. O limite em vigor em `T` sai do pedido mais recente com `requested_at <= T`: se ele já vale (`effective_at <= T`), é o valor dele; se ainda não vale (aumento pendente), é o limite em vigor imediatamente antes desse pedido. Sem pedido, R$ 1.000. Assim uma redução nunca é desfeita por um aumento pedido antes dela |
 | `unregistered_device_limit_exceeded` | Aparelho não cadastrado e (valor do Pix `> R$ 200` ou soma do dia no mesmo aparelho `> R$ 1.000`). Vale também em início frio: o motor não recebe o cadastro de aparelhos do banco, então todo aparelho é tratado como novo até o motor cadastrá-lo |
 | `impossible_travel` | Velocidade `> 900 km/h` com o aparelho cadastrado |
@@ -77,12 +77,12 @@ O `down -v` só é preciso quando o `database/database.sql` muda, porque o banco
 | `monthly_volume_above_typical` | Fora do início frio, período de referência com 30 dias ou mais, volume do mês atual `>=` piso e `> 3 ×` volume mensal típico |
 | `destination_account_opened_very_recently` | Conta de destino com menos de 7 dias. Vale 25 pontos, abaixo do limiar de alerta: sozinha não gera alerta |
 | `destination_account_opened_recently` | Conta de destino com menos de 30 dias e sem a regra anterior |
-| `new_destination_above_usual_ceiling` | Documento do recebedor ausente do histórico do pagador e valor acumulado no recebedor `>` teto habitual |
+| `new_destination_above_usual_ceiling` | Documento do recebedor ausente dos Pix aceitos do pagador anteriores à janela de curto prazo (destino novo) e valor acumulado no recebedor `>` teto habitual. Pix aceitos nas últimas 24 h ainda não tornam o destino conhecido, para o fracionamento num destino novo não escapar |
 | `destination_receiving_from_many_sources` | Recebedor PF e documentos de pagador distintos nas tentativas para o mesmo documento de recebedor em `(T menos 1 h, T]` com valor `>=` piso das regras de valor, contando o atual se ele também atingir o piso, `>= 5` |
 | `destination_rejected_for_other_sources` | Documentos de outros pagadores com análise para o mesmo documento de recebedor em `(T menos 7 dias, T]` que teve 2FA recusado, ou que foi reprovada tendo entre as disparadas alguma regra da família contraparte ou `new_account_to_new_destination_far_above_cap`, `>= 2`. Análises em que esta regra disparou nunca contam. Reprovação só por sinal do pagador (limite noturno, aparelho compartilhado, viagem impossível) não conta |
 | `destination_document_in_many_accounts` | Contas de destino distintas (participante, agência e número) nas tentativas para o mesmo documento de recebedor em `(T menos 24 h, T]`, contando a atual, `>= 3` para PF e `>= 10` para PJ |
 | `same_owner` | Documento do pagador igual ao do recebedor |
-| `known_destination` | 3 ou mais Pix aceitos do pagador para o mesmo documento de recebedor no histórico |
+| `known_destination` | 3 ou mais Pix aceitos do pagador para o mesmo documento de recebedor no histórico, anteriores à janela de curto prazo |
 | `long_registered_device` | Aparelho cadastrado para o pagador com `registered_at <= T menos 30 dias` |
 
 ### Cadastro de aparelho
@@ -317,5 +317,5 @@ Essas conferências não entram na suíte, porque a regra do projeto é testar s
 | `rules/test_reducer_rules.py` | 6 | Mesma titularidade; destino conhecido a partir de 3 Pix; aparelho cadastrado há mais de 30 dias |
 | `two_factor/test_two_factor_confirmation.py` | 21 | Confirmação e recusa gravadas; repetição, inclusive com outro momento; resultados opostos em paralelo gravam um só; resultado trocado dá 409; análise sem 2FA dá 409; 404; fora da validade dá 422; último segundo aceito; corpo inválido; token; 2FA confirmado entra no histórico e cadastra o aparelho, recusado não |
 | `source_nightly_limit/test_source_nightly_limit.py` | 15 | Aumento vale em 24 h, redução na hora, comparação com o limite em vigor; documento sem pontuação; CNPJ e CPF inválido dão 422; corpo inválido; data inexistente; token |
-| `risk_policy/test_risk_policy.py` | 38 | Formato da política; regulatórias fora; modelos diferem só no multiplicador; política do banco segue o equilibrado; versão inexistente; token; edição herda o resto; versão antiga não muda; troca de modelo; análise grava a versão nova; regra desligada para; pontos editados; multiplicador conservador; piso das regras de valor contra o acumulado; limite de PJ; cada edição incoerente dá 422 sem criar versão, inclusive limite fracionado e com 3 casas; corpo inválido dá 400; edições simultâneas nunca repetem versão |
+| `risk_policy/test_risk_policy.py` | 39 | Formato da política; regulatórias fora; modelos diferem só no multiplicador; política do banco segue o equilibrado; versão inexistente; token; edição herda o resto; versão antiga não muda; troca de modelo; análise grava a versão nova; regra desligada para; pontos editados; multiplicador conservador; piso das regras de valor contra o acumulado; limite de PJ; cada edição incoerente dá 422 sem criar versão, inclusive limite fracionado e com 3 casas; corpo inválido dá 400; edições simultâneas nunca repetem versão |
 | `test_healthcheck.py` | 6 | Os testes do template, sem mudança |

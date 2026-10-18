@@ -1,0 +1,403 @@
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Optional
+
+from controllers.rules.credibility import points_weighted_by_history
+from controllers.rules.transaction_context import TransactionContext
+from utils.money import brazilian_reais
+
+
+UNREGISTERED_DEVICE_PIX_LIMIT_CENTS = 20000
+UNREGISTERED_DEVICE_DAILY_LIMIT_CENTS = 100000
+
+
+@dataclass(frozen=True)
+class RuleHit:
+    code: str
+    points: int
+    reason: str
+
+
+class PixRule:
+    code = ""
+
+    def evaluate(self, context: TransactionContext) -> Optional[RuleHit]:
+        raise NotImplementedError
+
+    def hit(self, points: int, reason: str) -> RuleHit:
+        return RuleHit(self.code, points, reason)
+
+
+class EditablePixRule(PixRule):
+    def evaluate(self, context: TransactionContext) -> Optional[RuleHit]:
+        setting = context.setting(self.code)
+
+        if not setting.enabled:
+            return None
+
+        return self.evaluate_with(context, setting)
+
+    def evaluate_with(self, context: TransactionContext, setting) -> Optional[RuleHit]:
+        raise NotImplementedError
+
+
+class DeviceUsedByManySources(EditablePixRule):
+    code = "device_used_by_many_sources"
+
+    def evaluate_with(self, context, setting):
+        other_sources = context.pix_analysis_repository.count_other_sources_on_device(
+            context.pix.device_id, context.pix.source_document, context.window_start(setting.window_minutes), context.moment
+        )
+        sources_on_device = other_sources + 1
+
+        if sources_on_device >= setting.threshold:
+            return self.hit(0, f"Aparelho usado por {sources_on_device} pagadores diferentes em pouco tempo")
+        return None
+
+
+class ImpossibleTravelOnUnregisteredDevice(EditablePixRule):
+    code = "impossible_travel_on_unregistered_device"
+
+    def evaluate_with(self, context, setting):
+        speed = context.travel_speed_kmh
+
+        if speed is not None and speed > setting.threshold and not context.is_device_registered:
+            return self.hit(0, f"Deslocamento de {speed_text(speed)} desde o Pix anterior, num aparelho não cadastrado")
+        return None
+
+
+class NewAccountToNewDestinationFarAboveCap(EditablePixRule):
+    code = "new_account_to_new_destination_far_above_cap"
+
+    def evaluate_with(self, context, setting):
+        limit = setting.threshold * context.new_account_cap_cents
+
+        if context.is_new_account and context.is_new_destination and context.accumulated_amount_to_destination > limit:
+            return self.hit(
+                0,
+                f"Conta nova pagando {brazilian_reais(context.accumulated_amount_to_destination)} a um destino novo, "
+                f"acima de {brazilian_reais(limit)}",
+            )
+        return None
+
+
+class NightlyLimitExceeded(PixRule):
+    code = "nightly_limit_exceeded"
+
+    def evaluate(self, context):
+        pix = context.pix
+        individual_to_individual = pix.source_person_type == "individual" and pix.destination_person_type == "individual"
+
+        if not individual_to_individual or not context.is_night:
+            return None
+
+        night_total = pix.amount_cents + context.limit_usage_since(
+            context.night_start, inclusive=True, destination_person_type="individual"
+        )
+
+        if night_total > context.nightly_limit_cents:
+            return self.hit(
+                0,
+                f"Soma da noite de {brazilian_reais(night_total)} acima do limite noturno de {brazilian_reais(context.nightly_limit_cents)}",
+            )
+        return None
+
+
+class UnregisteredDeviceLimitExceeded(PixRule):
+    code = "unregistered_device_limit_exceeded"
+
+    def evaluate(self, context):
+        if context.is_device_registered:
+            return None
+
+        if context.pix.amount_cents > UNREGISTERED_DEVICE_PIX_LIMIT_CENTS:
+            return self.hit(0, f"Pix de {brazilian_reais(context.pix.amount_cents)} num aparelho não cadastrado, acima de R$ 200,00")
+
+        day_total = context.pix.amount_cents + context.limit_usage_since(
+            context.local_day_start, inclusive=True, device_id=context.pix.device_id
+        )
+
+        if day_total > UNREGISTERED_DEVICE_DAILY_LIMIT_CENTS:
+            return self.hit(0, f"Soma do dia de {brazilian_reais(day_total)} num aparelho não cadastrado, acima de R$ 1.000,00")
+        return None
+
+
+class ImpossibleTravel(EditablePixRule):
+    code = "impossible_travel"
+
+    def evaluate_with(self, context, setting):
+        speed = context.travel_speed_kmh
+
+        if speed is not None and speed > setting.threshold and context.is_device_registered:
+            return self.hit(setting.points, f"Deslocamento de {speed_text(speed)} desde o Pix anterior")
+        return None
+
+
+class UnfamiliarValueRule(EditablePixRule):
+    value_name = ""
+
+    def value_of(self, context, analysis):
+        raise NotImplementedError
+
+    def evaluate_with(self, context, setting):
+        if context.is_cold_start or self.value_of(context, context.pix) is None:
+            return None
+
+        if not context.is_value_never_seen(lambda analysis: self.value_of(context, analysis)):
+            return None
+
+        points = points_weighted_by_history(setting.points, context.history_count, setting.threshold)
+
+        if points > 0:
+            return self.hit(points, f"{self.value_name} nunca usado nos {context.history_count} Pix aceitos do pagador")
+        return None
+
+
+class IpUnfamiliar(UnfamiliarValueRule):
+    code = "ip_unfamiliar"
+    value_name = "IP"
+
+    def value_of(self, context, analysis):
+        return context.ip_of(analysis)
+
+
+class LocationUnfamiliar(UnfamiliarValueRule):
+    code = "location_unfamiliar"
+    value_name = "Local"
+
+    def value_of(self, context, analysis):
+        return context.location_of(analysis)
+
+
+class ChannelUnfamiliar(UnfamiliarValueRule):
+    code = "channel_unfamiliar"
+    value_name = "Canal"
+
+    def value_of(self, context, analysis):
+        return context.channel_of(analysis)
+
+
+class TwoFactorDeniedRecently(EditablePixRule):
+    code = "two_factor_denied_recently"
+
+    def evaluate_with(self, context, setting):
+        window_start = context.window_start(setting.window_minutes)
+        denied_recently = any(
+            analysis.two_factor_confirmation is not None
+            and analysis.two_factor_confirmation.result == "denied"
+            and window_start < analysis.two_factor_confirmation.confirmed_at <= context.moment
+            for analysis in context.source_analyses
+        )
+
+        if denied_recently:
+            return self.hit(setting.points, "O pagador recusou um 2FA há pouco tempo")
+        return None
+
+
+class NewAccountAboveCap(EditablePixRule):
+    code = "new_account_above_cap"
+
+    def evaluate_with(self, context, setting):
+        if context.is_new_account and context.accumulated_total_amount > context.new_account_cap_cents:
+            return self.hit(
+                setting.points,
+                f"Conta nova pagando {brazilian_reais(context.accumulated_total_amount)}, "
+                f"acima do teto de {brazilian_reais(context.new_account_cap_cents)}",
+            )
+        return None
+
+
+class BurstOfPix(EditablePixRule):
+    code = "burst_of_pix"
+
+    def evaluate_with(self, context, setting):
+        window_start = context.window_start(setting.window_minutes)
+        attempts = 1 + sum(1 for analysis in context.source_analyses if analysis.transaction_date > window_start)
+
+        if attempts >= setting.threshold:
+            return self.hit(setting.points, f"{attempts} Pix do pagador em {setting.window_minutes} minutos")
+        return None
+
+
+class AmountAboveBaseline(EditablePixRule):
+    code = "amount_above_baseline"
+
+    def evaluate_with(self, context, setting):
+        compared_amount = context.accumulated_amount_to_destination
+
+        if context.is_cold_start or compared_amount < context.policy.amount_rules_floor_cents:
+            return None
+
+        limit = setting.threshold * context.baseline_amount
+
+        if compared_amount > limit:
+            return self.hit(
+                setting.points,
+                f"{brazilian_reais(compared_amount)} para o recebedor, acima de {setting.threshold} vezes a base de "
+                f"{brazilian_reais(context.baseline_amount)}",
+            )
+        return None
+
+
+class MonthlyVolumeAboveTypical(EditablePixRule):
+    code = "monthly_volume_above_typical"
+
+    def evaluate_with(self, context, setting):
+        if context.is_cold_start:
+            return None
+
+        current_month_start = context.window_start(setting.window_minutes)
+        reference_start = min(analysis.transaction_date for analysis in context.accepted_history)
+        reference_days = (current_month_start - reference_start).total_seconds() / 86400
+
+        if reference_days < 30:
+            return None
+
+        reference_total = sum(
+            analysis.amount_cents
+            for analysis in context.accepted_history
+            if reference_start <= analysis.transaction_date <= current_month_start
+        )
+        typical_month = reference_total * 30 / reference_days
+        current_month = context.pix.amount_cents + context.limit_usage_since(current_month_start)
+
+        if current_month < context.policy.amount_rules_floor_cents:
+            return None
+
+        if current_month > float(setting.threshold) * typical_month:
+            return self.hit(
+                setting.points,
+                f"Volume do mês de {brazilian_reais(current_month)}, acima de {setting.threshold} vezes o mês típico de "
+                f"{brazilian_reais(typical_month)}",
+            )
+        return None
+
+
+class DestinationAccountOpenedVeryRecently(EditablePixRule):
+    code = "destination_account_opened_very_recently"
+
+    def evaluate_with(self, context, setting):
+        if context.destination_account_age < timedelta(days=float(setting.threshold)):
+            return self.hit(setting.points, f"Conta de destino aberta há {context.destination_account_age.days} dias")
+        return None
+
+
+class DestinationAccountOpenedRecently(EditablePixRule):
+    code = "destination_account_opened_recently"
+
+    def evaluate_with(self, context, setting):
+        very_recent = context.setting(DestinationAccountOpenedVeryRecently.code)
+        is_very_recent = very_recent.enabled and context.destination_account_age < timedelta(days=float(very_recent.threshold))
+
+        if not is_very_recent and context.destination_account_age < timedelta(days=float(setting.threshold)):
+            return self.hit(setting.points, f"Conta de destino aberta há {context.destination_account_age.days} dias")
+        return None
+
+
+class NewDestinationAboveUsualCeiling(EditablePixRule):
+    code = "new_destination_above_usual_ceiling"
+
+    def evaluate_with(self, context, setting):
+        compared_amount = context.accumulated_amount_to_destination
+
+        if context.is_new_destination and compared_amount > context.usual_ceiling_amount:
+            return self.hit(
+                setting.points,
+                f"Destino novo recebendo {brazilian_reais(compared_amount)}, acima do teto habitual de "
+                f"{brazilian_reais(context.usual_ceiling_amount)}",
+            )
+        return None
+
+
+class DestinationReceivingFromManySources(EditablePixRule):
+    code = "destination_receiving_from_many_sources"
+
+    def evaluate_with(self, context, setting):
+        if context.pix.destination_person_type != "individual":
+            return None
+
+        floor = context.policy.amount_rules_floor_cents
+        other_sources = context.pix_analysis_repository.count_other_sources_paying_destination_from(
+            context.pix.destination_document,
+            context.pix.source_document,
+            floor,
+            context.window_start(setting.window_minutes),
+            context.moment,
+        )
+        sources = other_sources + (1 if context.pix.amount_cents >= floor else 0)
+
+        if sources >= setting.threshold:
+            return self.hit(setting.points, f"Recebedor PF com {sources} pagadores diferentes em {setting.window_minutes} minutos")
+        return None
+
+
+class DestinationRejectedForOtherSources(EditablePixRule):
+    code = "destination_rejected_for_other_sources"
+
+    def __init__(self, own_rule_id: int) -> None:
+        self.own_rule_id = own_rule_id
+
+    def evaluate_with(self, context, setting):
+        other_sources = context.pix_analysis_repository.count_other_sources_with_destination_rejections(
+            context.pix.destination_document,
+            context.pix.source_document,
+            self.own_rule_id,
+            context.window_start(setting.window_minutes),
+            context.moment,
+        )
+
+        if other_sources >= setting.threshold:
+            return self.hit(setting.points, f"Recebedor com reprovações ou 2FA recusados de {other_sources} outros pagadores")
+        return None
+
+
+class DestinationDocumentInManyAccounts(EditablePixRule):
+    code = "destination_document_in_many_accounts"
+
+    def evaluate_with(self, context, setting):
+        pix = context.pix
+        accounts = context.pix_analysis_repository.find_destination_accounts_between(
+            pix.destination_document, context.window_start(setting.window_minutes), context.moment
+        )
+        accounts.add((pix.destination_participant, pix.destination_branch, pix.destination_account_number))
+        threshold = setting.company_threshold if pix.destination_person_type == "company" else setting.threshold
+
+        if len(accounts) >= threshold:
+            return self.hit(setting.points, f"Recebedor recebendo em {len(accounts)} contas diferentes em pouco tempo")
+        return None
+
+
+class SameOwner(EditablePixRule):
+    code = "same_owner"
+
+    def evaluate_with(self, context, setting):
+        if context.pix.source_document == context.pix.destination_document:
+            return self.hit(setting.points, "Pix para conta do mesmo titular")
+        return None
+
+
+class KnownDestination(EditablePixRule):
+    code = "known_destination"
+
+    def evaluate_with(self, context, setting):
+        if context.accepted_count_to_destination >= setting.threshold:
+            return self.hit(setting.points, f"Recebedor com {context.accepted_count_to_destination} Pix aceitos do pagador")
+        return None
+
+
+class LongRegisteredDevice(EditablePixRule):
+    code = "long_registered_device"
+
+    def evaluate_with(self, context, setting):
+        registered_device = context.registered_device
+        old_enough = context.moment - timedelta(days=float(setting.threshold))
+
+        if context.is_device_registered and registered_device.registered_at <= old_enough:
+            return self.hit(setting.points, f"Aparelho cadastrado há {(context.moment - registered_device.registered_at).days} dias")
+        return None
+
+
+def speed_text(speed: float) -> str:
+    if speed == float("inf"):
+        return "distância sem tempo entre os Pix"
+    return f"{round(speed)} km/h"

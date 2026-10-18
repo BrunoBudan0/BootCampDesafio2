@@ -1,4 +1,5 @@
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy.orm import relationship
 
 from models.base import Base
 
@@ -17,3 +18,5 @@ class Rule(Base):
     uses_company_threshold = Column(Boolean, nullable=False)
     description = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    forced_decision = relationship("Decision")

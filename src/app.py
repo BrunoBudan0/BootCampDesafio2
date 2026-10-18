@@ -9,7 +9,7 @@ from middlewares import (
     register_request_logger_middleware,
     register_session_manager_middleware,
 )
-from resources import HealthCheckResource, RiskPolicyResource
+from resources import HealthCheckResource, PixTransactionResource, RiskPolicyResource, SourceResource
 from utils.logger import setup_logging
 
 
@@ -137,6 +137,24 @@ def create_app() -> FastAPI:
     application.add_api_route("/risk-policy/templates", risk_policy_resource.on_get_templates, methods=["GET"])
     application.add_api_route("/risk-policy/versions", risk_policy_resource.on_post_version, methods=["POST"])
     application.add_api_route("/risk-policy/versions/{version}", risk_policy_resource.on_get_version, methods=["GET"])
+
+    pix_transaction_resource = PixTransactionResource()
+
+    application.add_api_route("/pix/transaction", pix_transaction_resource.on_post, methods=["POST"])
+    application.add_api_route("/pix/transaction/{pix_id}", pix_transaction_resource.on_get, methods=["GET"])
+    application.add_api_route(
+        "/pix/transaction/{pix_id}/two-factor",
+        pix_transaction_resource.on_post_two_factor,
+        methods=["POST"],
+    )
+
+    source_resource = SourceResource()
+
+    application.add_api_route(
+        "/sources/{document_number}/nightly-limit",
+        source_resource.on_post_nightly_limit,
+        methods=["POST"],
+    )
 
     register_error_handlers(application)
 

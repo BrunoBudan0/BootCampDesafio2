@@ -77,9 +77,15 @@ def payer_with_accepted_history(
     return payer, payee, analyses
 
 
-def payer_with_registered_device() -> Payer:
-    payer, _, _ = payer_with_accepted_history(business_hours_today() - timedelta(days=2), 1)
-    return payer
+def payer_with_registered_device(payee: Payee = None) -> tuple:
+    first_pix_date = business_hours_today() - timedelta(days=10)
+    payer, payee, _ = payer_with_accepted_history(first_pix_date, 1, payee=payee)
+    analyze_expecting(
+        pix_payload(payer, payee, first_pix_date + timedelta(days=1), 100000),
+        "approved",
+        "subir o teto habitual do pagador para R$ 1.000 no aparelho cadastrado",
+    )
+    return payer, payee
 
 
 def new_account_payer(transaction_date: datetime) -> Payer:

@@ -58,7 +58,7 @@ class TestNewAccountAboveCap:
         payer = new_account_payer(transaction_date)
         analyze(pix_payload(payer, new_company_payee(), transaction_date, 60000), "primeira parte do valor")
 
-        analysis = analyze(pix_payload(payer, new_company_payee(), transaction_date + timedelta(minutes=10), 50000))
+        analysis = analyze(pix_payload(payer, new_company_payee(), transaction_date + timedelta(minutes=5), 50000))
 
         assert_rule_fired(analysis, "new_account_above_cap")
 

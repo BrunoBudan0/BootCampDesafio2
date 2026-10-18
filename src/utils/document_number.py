@@ -62,3 +62,45 @@ def is_valid_cpf(document_number: str) -> bool:
             return False
 
     return True
+
+
+CNPJ_LENGTH = 14
+CNPJ_FIRST_CHECK_DIGIT_WEIGHTS = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+CNPJ_SECOND_CHECK_DIGIT_WEIGHTS = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+DOCUMENT_PUNCTUATION = ".-/"
+
+
+def normalized_document_number(document_number: str) -> str:
+    return "".join(character for character in document_number if character not in DOCUMENT_PUNCTUATION).upper()
+
+
+def cnpj_check_digit(characters: str, weights: list) -> int:
+    remainder = sum((ord(character) - ord("0")) * weight for character, weight in zip(characters, weights)) % 11
+    return 0 if remainder < 2 else 11 - remainder
+
+
+def is_valid_cnpj(document_number: str) -> bool:
+    cnpj = normalized_document_number(document_number)
+
+    if len(cnpj) != CNPJ_LENGTH or not cnpj[:12].isalnum() or not cnpj[12:].isdigit() or len(set(cnpj)) == 1:
+        return False
+
+    first_check_digit = cnpj_check_digit(cnpj[:12], CNPJ_FIRST_CHECK_DIGIT_WEIGHTS)
+    second_check_digit = cnpj_check_digit(cnpj[:12] + str(first_check_digit), CNPJ_SECOND_CHECK_DIGIT_WEIGHTS)
+    return cnpj[12:] == f"{first_check_digit}{second_check_digit}"
+
+
+def is_cpf_shaped(document_number: str) -> bool:
+    normalized = normalized_document_number(document_number)
+    return len(normalized) == CPF_LENGTH and normalized.isdigit()
+
+
+def is_valid_document_number(document_number: str) -> bool:
+    if is_cpf_shaped(document_number):
+        return is_valid_cpf(document_number)
+
+    return is_valid_cnpj(document_number)
+
+
+def person_type_of(document_number: str) -> str:
+    return "individual" if is_cpf_shaped(document_number) else "company"

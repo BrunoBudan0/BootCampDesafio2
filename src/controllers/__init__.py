@@ -1,1 +1,3 @@
 from controllers.risk_policy_controller import RiskPolicyController
+from controllers.pix_analysis_controller import PixAnalysisController
+from controllers.source_controller import SourceController

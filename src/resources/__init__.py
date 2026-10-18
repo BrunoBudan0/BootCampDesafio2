@@ -1,2 +1,4 @@
 from resources.health_check import HealthCheckResource
 from resources.risk_policy import RiskPolicyResource
+from resources.pix_transaction import PixTransactionResource
+from resources.source import SourceResource
